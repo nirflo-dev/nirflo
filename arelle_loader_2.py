@@ -42,7 +42,7 @@ if not config["password"]:
     raise RuntimeError(f".env not found or DB_PASSWORD is empty. Expected at: {env_path}")
 
 BASE_DIR_PATH = Path(__file__).resolve().parent.parent.parent
-XBRL_DIR = BASE_DIR_PATH / "data" / "XBRL"
+XBRL_DIR = Path(r"D:\MintigoInvesment\data\XBRL")
 
 
 START_YEAR = 2023
