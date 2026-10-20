@@ -97,6 +97,8 @@ DEPRECIATION_TAG = "Depreciation"
 AMORTIZATION_TAG = "Amortization"
 
 NET_INCOME_PARENT_TAGS = ["ProfitLossAttributableToParentEntity"]
+SELLING_EXPENSE_TAGS = ["SellingExpenses"]
+GENERAL_ADMIN_EXPENSE_TAGS = ["GeneralAndAdministrativeExpenses"]
 EPS_TAGS = ["BasicEarningsLossPerShareFromContinuingOperations"]
 SHARES_MIN = 1e7
 SHARES_MAX = 5e11
@@ -167,10 +169,16 @@ SAVE_COLUMNS = [
     "report_type", "rounding_level", "sector", "subsector",
 ]
 
+NEW_COLUMNS = [
+    "net_income_prior", "net_income_parent", "net_income_parent_prior",
+    "operating_profit_prior", "gross_profit_prior",
+    "core_operating_profit", "core_operating_profit_prior",
+]
+
 OPTIONAL_COLUMNS = [
     "fx_rate_date", "fx_rate_basis", "operating_profit_source", "outstanding_shares_source",
     "fx_rate_reported", "fx_rate_engine_period_end",
-]
+] + NEW_COLUMNS
 
 REQUIRED_COLUMNS = set(SAVE_COLUMNS) | {"ticker", "year", "period"}
 
@@ -421,22 +429,22 @@ def compute_insurance_total_income(all_raw_tags: dict, scope: str, target_days: 
     return sum(present) if present else None
 
 
-def resolve_operating_profit(all_raw_tags: dict, dei: dict, target_days: int):
-    reported = first_value(OPERATING_PROFIT_TAGS, all_raw_tags, "current", target_days)
+def resolve_operating_profit(all_raw_tags: dict, dei: dict, target_days: int, scope: str = "current"):
+    reported = first_value(OPERATING_PROFIT_TAGS, all_raw_tags, scope, target_days)
     if reported is not None:
         return reported, "tag:ProfitFromOperation"
 
     if is_financial_entity(dei):
         return None, None
 
-    pretax = first_value(PRETAX_PROFIT_TAGS, all_raw_tags, "current", target_days)
+    pretax = first_value(PRETAX_PROFIT_TAGS, all_raw_tags, scope, target_days)
     if pretax is None:
         return None, None
 
-    finance_costs = first_value(FINANCE_COST_TAGS, all_raw_tags, "current", target_days) or 0.0
-    finance_income = first_value(FINANCE_INCOME_TAGS, all_raw_tags, "current", target_days) or 0.0
+    finance_costs = first_value(FINANCE_COST_TAGS, all_raw_tags, scope, target_days) or 0.0
+    finance_income = first_value(FINANCE_INCOME_TAGS, all_raw_tags, scope, target_days) or 0.0
     equity_method = sum(
-        pick_current_value(all_raw_tags.get(tag, [])) or 0.0 for tag in EQUITY_METHOD_TAGS
+        pick_value(all_raw_tags.get(tag, []), scope, target_days) or 0.0 for tag in EQUITY_METHOD_TAGS
     )
     return pretax + finance_costs - finance_income - equity_method, "derived:pretax_plus_finance_net"
 
@@ -471,8 +479,22 @@ def derive_shares(net_income, eps, eps_digits=None):
     return None, None
 
 
+def resolve_core_operating_profit(all_raw_tags: dict, dei: dict, target_days: int, scope: str = "current"):
+    if is_financial_entity(dei):
+        return None
+
+    gross_profit = first_value(["GrossProfit"], all_raw_tags, scope, target_days)
+    selling = first_value(SELLING_EXPENSE_TAGS, all_raw_tags, scope, target_days)
+    admin = first_value(GENERAL_ADMIN_EXPENSE_TAGS, all_raw_tags, scope, target_days)
+
+    if gross_profit is None or (selling is None and admin is None):
+        return None
+    return gross_profit - abs(selling or 0.0) - abs(admin or 0.0)
+
+
 def compute_extended_metrics(all_raw_tags: dict, dei: dict, target_days: int) -> dict:
     operating_profit, operating_source = resolve_operating_profit(all_raw_tags, dei, target_days)
+    operating_profit_prior, _ = resolve_operating_profit(all_raw_tags, dei, target_days, "prior")
     net_income = first_value(NET_INCOME_PARENT_TAGS, all_raw_tags, "current", target_days)
     eps_entry = first_entry(EPS_TAGS, all_raw_tags)
     eps = eps_entry["v"] if eps_entry else None
@@ -481,6 +503,11 @@ def compute_extended_metrics(all_raw_tags: dict, dei: dict, target_days: int) ->
     return {
         "operating_profit": operating_profit,
         "operating_profit_source": operating_source,
+        "operating_profit_prior": operating_profit_prior,
+        "net_income_parent": net_income,
+        "net_income_parent_prior": first_value(NET_INCOME_PARENT_TAGS, all_raw_tags, "prior", target_days),
+        "core_operating_profit": resolve_core_operating_profit(all_raw_tags, dei, target_days, "current"),
+        "core_operating_profit_prior": resolve_core_operating_profit(all_raw_tags, dei, target_days, "prior"),
         "depreciation_amortization": resolve_depreciation_amortization(all_raw_tags, target_days),
         "derived_shares": shares,
         "derived_shares_source": shares_source,
@@ -764,6 +791,15 @@ def load_soup(full_path):
         return BeautifulSoup(f.read(), "lxml-xml")
 
 
+def prior_for_term(term: str, golden_metrics: dict, metric_tags: dict, all_raw_tags: dict, target_days: int):
+    if golden_metrics.get(term) is None:
+        return None
+    tag = metric_tags.get(term)
+    if tag is None:
+        return None
+    return pick_prior_value(all_raw_tags.get(tag, []), target_days)
+
+
 def parse_filing(full_path, ticker: str, year: int, period: str, mappings: dict):
     soup = load_soup(full_path)
 
@@ -807,10 +843,12 @@ def parse_filing(full_path, ticker: str, year: int, period: str, mappings: dict)
     }
     revenue_tag_source = None
 
+    metric_tags = {}
     for term, candidate_tags in mappings.items():
         value, tag_source = resolve_metric(candidate_tags, all_raw_tags)
         if value is not None:
             golden_metrics[term] = value
+            metric_tags[term] = tag_source
         if term == "revenue":
             revenue_tag_source = tag_source
 
@@ -847,9 +885,10 @@ def parse_filing(full_path, ticker: str, year: int, period: str, mappings: dict)
 
     for term, candidates in EXTRA_METRICS.items():
         if term not in golden_metrics:
-            value, _ = resolve_metric(candidates, all_raw_tags)
+            value, extra_tag = resolve_metric(candidates, all_raw_tags)
             if value is not None:
                 golden_metrics[term] = value
+                metric_tags[term] = extra_tag
 
     if revenue_tag_source == GROSS_PROFIT_AS_REVENUE_SOURCE:
         golden_metrics.pop("gross_profit", None)
@@ -871,8 +910,25 @@ def parse_filing(full_path, ticker: str, year: int, period: str, mappings: dict)
     if golden_metrics.get("operating_profit") is None:
         golden_metrics["operating_profit"] = extended["operating_profit"]
         golden_metrics["operating_profit_source"] = extended["operating_profit_source"]
+        golden_metrics["operating_profit_prior"] = (
+            extended["operating_profit_prior"] if extended["operating_profit"] is not None else None
+        )
     else:
         golden_metrics["operating_profit_source"] = "taxonomy_mapping"
+        golden_metrics["operating_profit_prior"] = prior_for_term(
+            "operating_profit", golden_metrics, metric_tags, all_raw_tags, target_days
+        )
+
+    golden_metrics["net_income_prior"] = prior_for_term(
+        "net_income", golden_metrics, metric_tags, all_raw_tags, target_days
+    )
+    golden_metrics["gross_profit_prior"] = prior_for_term(
+        "gross_profit", golden_metrics, metric_tags, all_raw_tags, target_days
+    )
+    golden_metrics["net_income_parent"] = extended["net_income_parent"]
+    golden_metrics["net_income_parent_prior"] = extended["net_income_parent_prior"]
+    golden_metrics["core_operating_profit"] = extended["core_operating_profit"]
+    golden_metrics["core_operating_profit_prior"] = extended["core_operating_profit_prior"]
 
     if golden_metrics.get("depreciation_amortization") is None:
         golden_metrics["depreciation_amortization"] = extended["depreciation_amortization"]
