@@ -1,0 +1,39 @@
+name: pead-chrome
+
+services:
+  pead-chrome:
+    container_name: pead-chrome
+    shm_size: "2gb"
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PEAD_CDP_PORT:-9222}:9222"
+      - "127.0.0.1:${PEAD_VNC_PORT:-6080}:6080"
+    volumes:
+      - pead_chrome_profile:/profile
+    build:
+      dockerfile_inline: |
+        FROM debian:bookworm-slim
+        RUN apt-get update && apt-get install -y --no-install-recommends \
+                wget ca-certificates gnupg xvfb x11vnc novnc websockify socat fonts-liberation \
+            && wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+            && apt-get install -y --no-install-recommends /tmp/chrome.deb \
+            && rm -rf /tmp/chrome.deb /var/lib/apt/lists/*
+    command:
+      - bash
+      - -c
+      - |
+        rm -f /profile/SingletonLock /profile/SingletonSocket /profile/SingletonCookie /tmp/.X99-lock
+        export DISPLAY=:99
+        Xvfb :99 -screen 0 1280x800x24 &
+        sleep 1
+        x11vnc -display :99 -forever -shared -nopw -rfbport 5900 -quiet &
+        websockify --web /usr/share/novnc 6080 localhost:5900 &
+        google-chrome-stable --remote-debugging-port=9223 --user-data-dir=/profile \
+          --no-first-run --no-default-browser-check --disable-dev-shm-usage \
+          --no-sandbox --window-size=1280,800 https://www.idx.co.id/id &
+        socat TCP-LISTEN:9222,fork,reuseaddr,bind=0.0.0.0 TCP:127.0.0.1:9223 &
+        wait -n
+
+volumes:
+  pead_chrome_profile:
+    name: pead_chrome_profile
