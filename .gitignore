@@ -4,6 +4,8 @@
 .env
 .env.*
 !.env.example
+.envrc
+.direnv/
 *.pem
 *.key
 
@@ -58,4 +60,4 @@ logs/
 .vscode/
 .idea/
 .DS_Store
-Thumbs.db.envrc
+Thumbs.db
