@@ -14,11 +14,13 @@ STOP_GRACE_SECONDS = 30
 STEPS = {
     "prices": ["run.py", "prices"],
     "fetch": ["run.py", "fetch"],
+    "universe": ["-m", "pipeline.build_universe"],
     "signals": ["-m", "analytics.signal_report", "--csv", "reports/signals.csv"],
     "portfolio": ["portfolio_cli.py", "evaluate-all"],
-    "xbrl": ["-m", "pipeline.backup_xbrl"],
+    "xbrl": ["data/r2/backup_xbrl.py"],
     "export": ["data/r2/export_db.py", "--upload"],
 }
+R2_STEPS = ("xbrl", "export")
 
 
 def log_has_errors(path, offset):
@@ -62,18 +64,27 @@ def run_step(name, args, log, log_path):
     return code, time.monotonic() - started, log_has_errors(log_path, offset)
 
 
+def select_steps(only, skip, include_r2):
+    names = [n for n in STEPS if (only is None or n in only) and n not in skip]
+    if only is None and not include_r2:
+        names = [n for n in names if n not in R2_STEPS]
+    return names
+
+
 def main():
     parser = argparse.ArgumentParser(description="Jalankan alur harian PEAD.")
     parser.add_argument("--skip", nargs="*", default=[], choices=list(STEPS))
     parser.add_argument("--only", nargs="*", default=None, choices=list(STEPS))
+    parser.add_argument("--r2", action="store_true", help="sertakan langkah R2 (xbrl dan export)")
     args = parser.parse_args()
 
-    names = [n for n in STEPS if (args.only is None or n in args.only) and n not in args.skip]
+    names = select_steps(args.only, args.skip, args.r2)
     LOG_DIR.mkdir(exist_ok=True)
     (ROOT / "reports").mkdir(exist_ok=True)
     log_path = LOG_DIR / f"daily_{datetime.now():%Y%m%d}.log"
     print(f"log: {log_path}")
     print(f"pantau: tail -f {log_path}")
+    print("langkah: " + ", ".join(names), flush=True)
 
     failed = []
     current = None

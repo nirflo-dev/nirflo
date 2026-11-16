@@ -17,7 +17,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-XBRL_DIR = Path(os.environ.get("MINTIGO_XBRL_DIR", r"D:\MintigoInvesment\data\XBRL"))
+XBRL_DIR = Path(
+    os.environ.get("MINTIGO_XBRL_DIR", Path(__file__).resolve().parents[1] / "data" / "XBRL")
+)
 
 START_YEAR = 2023
 PERIODS = ["Q1", "Q2", "Q3", "FY"]
