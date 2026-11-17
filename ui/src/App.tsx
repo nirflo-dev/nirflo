@@ -7,10 +7,17 @@ import { Empty, ErrorBoundary, ErrorState, Loading } from "./components/ui";
 
 const EmitenPage = lazy(() => import("./pages/EmitenPage"));
 const SignalsPage = lazy(() => import("./pages/SignalsPage"));
+const PortfolioPage = lazy(() => import("./pages/PortfolioPage"));
 const MacroPage = lazy(() => import("./pages/MacroPage"));
 const StatusPage = lazy(() => import("./pages/StatusPage"));
 
-const NAV = [["/emiten", "Emiten"], ["/sinyal", "Sinyal"], ["/makro", "Makro"], ["/status", "Status data"]] as const;
+const NAV = [
+  ["/emiten", "Emiten"],
+  ["/sinyal", "Sinyal"],
+  ["/portofolio", "Portofolio"],
+  ["/makro", "Makro"],
+  ["/status", "Status data"],
+] as const;
 
 export default function App() {
   const meta = useMeta();
@@ -27,7 +34,7 @@ export default function App() {
     <div className="shell">
       <a className="skip" href="#main">Lewati ke konten</a>
       <aside className="side">
-        <h1>Mintigo</h1>
+        <h1>Infinity</h1>
         <nav aria-label="Halaman utama">
           {NAV.map(([to, label]) => (
             <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "active" : "")}>{label}</NavLink>
@@ -55,7 +62,7 @@ export default function App() {
           <>
             {m?.source === "snapshot" && (
               <div className="banner" role="status">
-                Database tidak terjangkau. Tampilan memakai snapshot R2; Kinerja sinyal dan beberapa tabel mungkin tidak tersedia.
+                Database tidak terjangkau. Tampilan memakai snapshot R2; Kinerja sinyal, Portofolio, dan beberapa tabel tidak tersedia.
               </div>
             )}
             <ErrorBoundary key={pathname}>
@@ -64,6 +71,7 @@ export default function App() {
                   <Route path="/" element={<Navigate to="/emiten" replace />} />
                   <Route path="/emiten/:ticker?" element={<EmitenPage />} />
                   <Route path="/sinyal" element={<SignalsPage />} />
+                  <Route path="/portofolio" element={<PortfolioPage />} />
                   <Route path="/makro" element={<MacroPage />} />
                   <Route path="/status" element={<StatusPage />} />
                   <Route path="*" element={<Empty>Halaman tidak ditemukan.</Empty>} />

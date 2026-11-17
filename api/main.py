@@ -12,7 +12,8 @@ from typing import Any
 
 import orjson
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
+from api.auth import current_clerk_id
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
@@ -128,7 +129,7 @@ def summarize(values: pd.Series, negative: bool) -> dict:
     return {"n": n, "mean": float(v.mean()), "median": float(v.median()), "win": win, "ci": ci}
 
 
-app = FastAPI(title="Mintigo API")
+app = FastAPI(title="Nirflo API", dependencies=[Depends(current_clerk_id)])
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 jobs = RegimeJobs()
 
@@ -588,6 +589,9 @@ def regime(
                        execution_lag, prob_smooth_span, rebalance_band, risk_free, size_by_prob)
     return Json(regime_payload(result, days))
 
+from api.portfolio import router as portfolio_router  # noqa: E402
+
+app.include_router(portfolio_router)
 
 # ---------------------------------------------------------------- produksi: layani hasil build UI
 class SPA(StaticFiles):

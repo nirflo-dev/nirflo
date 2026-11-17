@@ -59,3 +59,4 @@ th:first-child,td:first-child{position:sticky;left:0;background:var(--surface)}
 .tablebar{display:flex;gap:16px;justify-content:space-between;align-items:center;font-size:13px;color:var(--muted);padding:6px 2px}
 .chip{border-radius:10px;padding:1px 8px;font-size:12px;background:color-mix(in srgb,var(--muted) 20%,transparent)}
 .chip.strong{background:color-mix(in srgb,var(--up) 22%,transparent)}.chip.moderate{background:color-mix(in srgb,var(--warn) 22%,transparent)}
+.banner ul{margin:0;padding-left:18px}

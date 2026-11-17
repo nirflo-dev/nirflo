@@ -6,7 +6,11 @@ export default defineConfig({
   server: { proxy: { "/api": "http://127.0.0.1:8000" } },
   build: {
     rollupOptions: {
-      output: { manualChunks: { echarts: ["echarts/core", "echarts/charts", "echarts/components", "echarts/renderers"] } },
+      output: {
+        manualChunks(id: string) {
+          if (id.includes("node_modules/echarts") || id.includes("node_modules/zrender")) return "echarts";
+        },
+      },
     },
   },
 });

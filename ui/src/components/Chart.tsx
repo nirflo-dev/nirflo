@@ -46,7 +46,6 @@ export const line = (name: string, x: string[], y: (number | null)[], color: str
   type: "line", name, showSymbol: false, data: pts(x, y), lineStyle: { width: 1.6, color }, itemStyle: { color }, ...extra,
 });
 
-/** Beberapa panel bertumpuk dengan sumbu waktu yang saling terhubung (zoom + crosshair). */
 export function stack(c: Palette, H: number, weights: number[], names: string[]) {
   const sum = weights.reduce((a, b) => a + b, 0);
   const usable = H - 34 - 26 - 14 * (weights.length - 1);
@@ -55,7 +54,7 @@ export function stack(c: Palette, H: number, weights: number[], names: string[])
   return {
     grid,
     xAxis: weights.map((_, i) => ({ ...X(c), gridIndex: i, axisLabel: { show: i === weights.length - 1, color: c.muted } })),
-    yAxis: weights.map((_, i) => ({ ...Y(c), ...yName(names[i]), gridIndex: i, nameTextStyle: { color: c.muted } })),
+    yAxis: weights.map((_, i): Record<string, unknown> => ({ ...Y(c), ...yName(names[i]), gridIndex: i, nameTextStyle: { color: c.muted } })),
     dataZoom: [{ type: "inside", xAxisIndex: weights.map((_, i) => i) }],
     axisPointer: { link: [{ xAxisIndex: "all" }] },
   };

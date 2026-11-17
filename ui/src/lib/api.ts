@@ -17,13 +17,20 @@ function qs(params?: Params) {
   return s ? `?${s}` : "";
 }
 
+let tokenGetter: (() => Promise<string | null>) | null = null;
+export const setTokenGetter = (f: (() => Promise<string | null>) | null) => { tokenGetter = f; };
+
 export async function api<R>(path: string, params?: Params, init?: RequestInit): Promise<R> {
-  const res = await fetch(`/api${path}${qs(params)}`, init);
+  const token = tokenGetter ? await tokenGetter() : null;
+  const headers = new Headers(init?.headers);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const res = await fetch(`/api${path}${qs(params)}`, { ...init, headers });
   if (!res.ok) {
     let msg: unknown = res.statusText;
     try { msg = (await res.json()).detail ?? msg; } catch { /* body kosong */ }
     throw new ApiError(res.status, typeof msg === "string" ? msg : JSON.stringify(msg));
   }
+  if (res.status === 204) return undefined as R;
   return res.json();
 }
 
