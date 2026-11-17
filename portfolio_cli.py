@@ -2,8 +2,12 @@ import argparse
 import json
 import sys
 
+
 import pandas as pd
 import psycopg2
+import numpy as np
+
+from core import universe_store
 from psycopg2 import errors
 
 from analytics.portfolio import evaluate
@@ -185,6 +189,53 @@ def cmd_history(args):
         return
     print(df.round(2).to_string(index=False))
 
+def cmd_quick(args):
+    holdings = store.list_holdings(args.portfolio)
+    if holdings.empty:
+        sys.exit(f"portofolio '{args.portfolio}' kosong")
+    tickers = sorted(holdings["ticker"].unique())
+    as_of, stats = universe_store.read_stats(tickers)
+    if as_of is None:
+        sys.exit("statistik universe belum ada, jalankan: python -m pipeline.build_universe")
+    problems = [
+        f"{t}: " + ("tidak ada di universe" if t not in stats.index else stats.loc[t, "note"])
+        for t in tickers
+        if t not in stats.index or not stats.loc[t, "eligible"]
+    ]
+    if problems:
+        sys.exit("tidak bisa dihitung cepat:\n  " + "\n  ".join(problems))
+
+    corr = universe_store.read_correlation(tickers)
+    shares = holdings.groupby("ticker")["lots"].sum().reindex(tickers) * 100
+    value = shares * stats.loc[tickers, "last_price"]
+    weights = (value / value.sum()).to_numpy()
+    sigma = stats.loc[tickers, "std_weekly"].to_numpy()
+    mu = stats.loc[tickers, "mean_excess_weekly"].to_numpy()
+    cov = corr.to_numpy() * np.outer(sigma, sigma)
+    variance = float(weights @ cov @ weights)
+    if not np.isfinite(variance) or variance <= 0:
+        sys.exit("korelasi antar saham belum lengkap di universe, gunakan perintah evaluate")
+
+    k = np.sqrt(52)
+    mean_week = float(weights @ mu)
+    per_week = mean_week / np.sqrt(variance)
+    n_obs = int(stats.loc[tickers, "n_weeks"].min())
+    se = np.sqrt((1 + 0.5 * per_week**2) / n_obs)
+    risk = weights * (cov @ weights) / variance
+    count = len(tickers)
+    avg_corr = (corr.to_numpy().sum() - count) / (count * (count - 1)) if count > 1 else None
+
+    table = pd.DataFrame({"bobot": weights, "kontribusi_risiko": risk}, index=tickers) * 100
+    print(f"\nEstimasi cepat dari statistik universe per {as_of} (tanpa membaca harga)")
+    print(table.round(1).to_string())
+    print(f"Rata-rata korelasi berpasangan: {num(avg_corr)}")
+    print(
+        f"Sharpe bobot sekarang: {per_week * k:.2f}  "
+        f"selang 95% [{(per_week - 1.96 * se) * k:.2f}, {(per_week + 1.96 * se) * k:.2f}]  "
+        f"excess {pct(mean_week * 52)}/thn  vol {pct(np.sqrt(variance) * k)}/thn  n={n_obs} mingguan"
+    )
+    print("Tidak mencakup Sharpe sejak beli; untuk itu gunakan evaluate.")
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -230,6 +281,9 @@ def main():
     p = sub.add_parser("history", parents=[common], help="riwayat evaluasi tersimpan")
     p.add_argument("--limit", type=int, default=30)
     p.set_defaults(func=cmd_history)
+
+    p = sub.add_parser("quick", parents=[common], help="estimasi cepat dari statistik universe (tanpa harga)")
+    p.set_defaults(func=cmd_quick)
 
     args = parser.parse_args()
     try:
