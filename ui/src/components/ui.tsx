@@ -49,7 +49,7 @@ export function Async<R>({ q, isEmpty, children }: {
 }
 
 export const Kpi = ({ label, value, hint, tone = "" }: { label: string; value: ReactNode; hint?: string; tone?: string }) => (
-  <div className="kpi" title={hint}><span>{label}</span><strong className={tone}>{value}</strong></div>
+  <div className="kpi" title={hint}><span>{label}</span><strong className={tone}>{value}</strong>{hint && <small>{hint}</small>}</div>
 );
 
 export function Segmented<V extends string>({ value, options, onChange, label }: {
@@ -76,8 +76,11 @@ export function Tabs({ value, tabs, onChange }: { value: string; tabs: { id: str
   );
 }
 
-export const Section = ({ title, children }: { title: string; children: ReactNode }) => (
-  <section className="card"><h3>{title}</h3>{children}</section>
+export const Section = ({ title, children, className = "", action }: { title: string; children: ReactNode; className?: string; action?: ReactNode }) => (
+  <section className={`card ${className}`.trim()}>
+    <div className="card-head"><h3>{title}</h3>{action}</div>
+    {children}
+  </section>
 );
 
 /** Input angka: nilai dikomit saat Enter/blur, jadi mengetik tidak memicu hitung ulang di tiap tombol. */

@@ -1,4 +1,5 @@
 import os
+import logging
 from pathlib import Path
 
 import httpx
@@ -19,3 +20,20 @@ def current_clerk_id(request: Request) -> str:
     if not state.is_signed_in:
         raise HTTPException(status_code=401, detail="Belum login")
     return state.payload["sub"]
+
+log = logging.getLogger(__name__)
+
+
+def clerk_display_name(clerk_id: str) -> str | None:
+    try:
+        u = clerk.users.get(user_id=clerk_id)
+    except Exception as exc:
+        log.warning("gagal mengambil profil Clerk: %s", exc)
+        return None
+    full = " ".join(p for p in (u.first_name, u.last_name) if p).strip()
+    if full:
+        return full
+    if u.username:
+        return u.username
+    email = next((e.email_address for e in (u.email_addresses or []) if e.id == u.primary_email_address_id), None)
+    return email.split("@")[0] if email else None

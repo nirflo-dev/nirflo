@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { day, num, pct, tone } from "../lib/format";
-import { useColors, useParam, type Palette } from "../lib/hooks";
+import { useColors, useParam } from "../lib/hooks";
 import {
   useEvaluation, useHistory, useHoldings, usePortfolioMutations, usePortfolios,
   type Evaluation, type Holding, type PfHistory, type SharpeBlock,
 } from "../lib/portfolio";
 import { baseOption, Chart, line, X, Y, yName } from "../components/Chart";
-import { Async, DataTable, Empty, ErrorState, Kpi, Loading, Section, Segmented, type Col } from "../components/ui";
+import { Async, Chip, DataTable, ErrorState, Kpi, Loading, Section, Segmented, type Col } from "../components/ui";
 
 const VERDICTS: Record<SharpeBlock["verdict"], string> = {
   positif: "di atas suku bunga",
@@ -14,36 +14,65 @@ const VERDICTS: Record<SharpeBlock["verdict"], string> = {
   tidak_pasti: "belum dapat dibedakan dari nol",
   tidak_dapat_dihitung: "tidak dapat dihitung",
 };
+const VERDICT_SHORT: Record<SharpeBlock["verdict"], string> = {
+  positif: "Di atas suku bunga",
+  negatif: "Di bawah suku bunga",
+  tidak_pasti: "Belum pasti",
+  tidak_dapat_dihitung: "Tidak dapat dihitung",
+};
 const SHARPE_ROWS = [["since_buy", "Sejak beli"], ["current_weights", "Bobot sekarang"], ["equal_weight", "Sama rata"]] as const;
 
 export default function PortfolioPage() {
   const [name, setName] = useParam("p", "default");
   const [mode, setMode] = useParam("mode", "full");
+  const [adding, setAdding] = useState(false);
   const list = usePortfolios();
   const holdings = useHoldings(name);
-  const hasHoldings = (holdings.data?.length ?? 0) > 0;
+  const rows = holdings.data ?? [];
+  const hasHoldings = rows.length > 0;
+  const ev = useEvaluation(name, mode, hasHoldings);
+  const e = hasHoldings ? ev.data : undefined;
+  const count = e?.correlation.tickers.length ?? 0;
+  const gridClass = ["pf-grid", e ? "" : "solo", e && count < 2 ? "nocorr" : ""].filter(Boolean).join(" ");
+
+  useEffect(() => setAdding(false), [name]);
 
   return (
     <>
-      <header className="pagehead">
-        <PortfolioPicker value={name} names={list.data?.map((p) => p.name) ?? []} onChange={setName} />
-        <Segmented
-          label="Mode perhitungan" value={mode} onChange={setMode}
-          options={[{ value: "full", label: "Lengkap" }, { value: "quick", label: "Cepat" }]}
-        />
+      <header className="pf-head">
+        <div>
+          <h2>Portofolio</h2>
+          <p className="muted">{e ? `${count} saham · data per ${day(e.as_of)}` : "Kinerja dan risiko portofolio saham IDX."}</p>
+        </div>
+        <div className="pf-controls">
+          <PortfolioPicker value={name} names={list.data?.map((p) => p.name) ?? []} onChange={setName} />
+          <Segmented
+            label="Mode perhitungan" value={mode} onChange={setMode}
+            options={[{ value: "full", label: "Lengkap" }, { value: "quick", label: "Cepat" }]}
+          />
+        </div>
       </header>
       {mode === "quick" && (
-        <p className="muted">
-          Mode cepat memakai statistik universe tanpa membaca harga. Hasilnya hanya Sharpe bobot sekarang, tanpa Sharpe sejak beli.
-        </p>
+        <p className="muted">Mode cepat memakai statistik universe tanpa membaca harga. Hasilnya hanya Sharpe bobot sekarang, tanpa Sharpe sejak beli.</p>
       )}
 
-      {hasHoldings ? <EvaluationSection name={name} mode={mode} />
-        : holdings.isPending ? <Loading />
+      {holdings.isPending ? <Loading />
         : holdings.isError ? <ErrorState error={holdings.error} retry={() => holdings.refetch()} />
-        : <Empty>Portofolio “{name}” belum memiliki posisi. Tambahkan posisi pertama di bawah.</Empty>}
+        : !hasHoldings ? <EmptyPortfolio name={name} />
+        : (
+          <>
+            {ev.isPending && <Loading label="Menghitung evaluasi…" />}
+            {ev.isError && <ErrorState error={ev.error} retry={() => ev.refetch()} />}
+            {e && <Summary e={e} />}
+            <div className={gridClass}>
+              {e && <SharpeSection e={e} />}
+              {e && <AllocationSection e={e} />}
+              <PositionsSection name={name} holdings={rows} adding={adding} setAdding={setAdding} />
+              {e && count > 1 && <Section title="Korelasi antar saham" className="pf-corr"><CorrelationTable e={e} /></Section>}
+            </div>
+          </>
+        )}
 
-      <HoldingsSection name={name} holdings={holdings.data ?? []} />
       <HistorySection name={name} />
     </>
   );
@@ -57,7 +86,7 @@ function PortfolioPicker({ value, names, onChange }: { value: string; names: str
     <label className="field">
       <span>Portofolio</span>
       <input
-        list="pf-list" value={text} autoComplete="off" style={{ width: 220 }}
+        list="pf-list" value={text} autoComplete="off"
         onChange={(e) => { setText(e.target.value); if (names.includes(e.target.value)) commit(e.target.value); }}
         onBlur={(e) => commit(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && commit(e.currentTarget.value)}
@@ -68,70 +97,46 @@ function PortfolioPicker({ value, names, onChange }: { value: string; names: str
   );
 }
 
-function EvaluationSection({ name, mode }: { name: string; mode: string }) {
-  const q = useEvaluation(name, mode);
-  return <Async q={q}>{(e) => <EvaluationView e={e} />}</Async>;
+function EmptyPortfolio({ name }: { name: string }) {
+  return (
+    <Section title={`Mulai portofolio “${name}”`} className="pf-empty">
+      <p className="muted">Tambahkan posisi pertama untuk melihat Sharpe ratio, alokasi risiko, dan korelasi antar saham.</p>
+      <AddHolding name={name} />
+    </Section>
+  );
 }
 
-// ------------------------------------------------------------------ hasil evaluasi
+function Summary({ e }: { e: Evaluation }) {
+  const now = e.sharpe.current_weights;
+  const n = e.correlation.tickers.length;
+  return (
+    <>
+      {e.warnings.length > 0 && (
+        <div className="banner" role="alert">
+          <ul>{e.warnings.map((w) => <li key={w}>{w}</li>)}</ul>
+        </div>
+      )}
+      <div className="kpis">
+        <Kpi label="Sharpe (bobot sekarang)" value={num(now.sharpe, 2)} tone={tone(now.sharpe)} hint={`Return ${VERDICTS[now.verdict]}`} />
+        <Kpi label="Rata-rata korelasi" value={num(e.correlation.average, 2)} hint={n > 1 ? "Rata-rata berpasangan antar saham" : "Perlu minimal 2 saham"} />
+        <Kpi label="Jumlah saham" value={n} />
+        <Kpi label="Data per" value={day(e.as_of)} hint={e.window ? `Jendela ${e.window.weeks} minggu` : "Estimasi dari statistik universe"} />
+      </div>
+    </>
+  );
+}
+
 type SRow = { label: string; b: SharpeBlock };
 
-function sharpeOption(c: Palette, rows: SRow[]) {
-  return baseOption(c, {
-    legend: { show: false },
-    tooltip: {
-      trigger: "item",
-      formatter: (p: { dataIndex: number }) => {
-        const r = rows[p.dataIndex];
-        return `${r.label}<br/>Sharpe ${num(r.b.sharpe, 2)} (95%: ${num(r.b.ci_low, 2)} sampai ${num(r.b.ci_high, 2)})`;
-      },
-    },
-    grid: { left: 110, right: 24, top: 16, bottom: 40 },
-    xAxis: Y(c, { ...yName("Sharpe ratio tahunan", 28) }),
-    yAxis: { type: "category", inverse: true, data: rows.map((r) => r.label), axisLabel: { color: c.text }, axisLine: { lineStyle: { color: c.border } } },
-    series: [
-      { // selang kepercayaan 95%
-        type: "custom", silent: true, z: 1,
-        data: rows.map((r, i) => [i, r.b.ci_low, r.b.ci_high]),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        renderItem: (_: unknown, api: any) => {
-          const i = api.value(0) as number;
-          const a = api.coord([api.value(1), i]), b = api.coord([api.value(2), i]);
-          const style = { stroke: c.text, lineWidth: 1.6 };
-          const cap = (p: number[]) => ({ type: "line", shape: { x1: p[0], y1: p[1] - 6, x2: p[0], y2: p[1] + 6 }, style });
-          return { type: "group", children: [{ type: "line", shape: { x1: a[0], y1: a[1], x2: b[0], y2: b[1] }, style }, cap(a), cap(b)] };
-        },
-      },
-      {
-        type: "scatter", symbolSize: 11, itemStyle: { color: c.accent },
-        data: rows.map((r, i) => [r.b.sharpe, i]),
-        markLine: { silent: true, symbol: "none", label: { show: false }, lineStyle: { color: c.muted }, data: [{ xAxis: 0 }] },
-      },
-    ],
-  });
-}
-
-function weightsOption(c: Palette, e: Evaluation) {
-  const tickers = Object.keys(e.weights);
-  const pctOf = (m: Record<string, number | null>) => tickers.map((t) => (m[t] == null ? null : (m[t] as number) * 100));
-  return baseOption(c, {
-    grid: { left: 56, right: 16, top: 36, bottom: 28 },
-    xAxis: { type: "category", data: tickers, axisLabel: { color: c.muted } },
-    yAxis: Y(c, { ...yName("Persen (%)", 40), scale: false }),
-    series: [
-      { type: "bar", name: "Bobot", data: pctOf(e.weights), itemStyle: { color: c.accent }, barMaxWidth: 32 },
-      { type: "bar", name: "Kontribusi risiko", data: pctOf(e.risk_contribution), itemStyle: { color: c.warn }, barMaxWidth: 32 },
-    ],
-  });
-}
-
-function EvaluationView({ e }: { e: Evaluation }) {
-  const c = useColors();
+function SharpeSection({ e }: { e: Evaluation }) {
   const rows: SRow[] = SHARPE_ROWS.flatMap(([k, label]) => (e.sharpe[k] ? [{ label, b: e.sharpe[k] as SharpeBlock }] : []));
-  const plotted = rows.filter((r) => r.b.sharpe != null && r.b.ci_low != null && r.b.ci_high != null);
-  const sOpt = useMemo(() => sharpeOption(c, plotted), [c, plotted]); // eslint-disable-line react-hooks/exhaustive-deps
-  const wOpt = useMemo(() => weightsOption(c, e), [c, e]);
-  const now = e.sharpe.current_weights;
+  const ok = (r: SRow) => r.b.sharpe != null && r.b.ci_low != null && r.b.ci_high != null;
+  const plotted = rows.filter(ok);
+  const lo = Math.min(0, ...plotted.map((r) => r.b.ci_low as number));
+  const hi = Math.max(0, ...plotted.map((r) => r.b.ci_high as number));
+  const pad = (hi - lo) * 0.06 || 0.5;
+  const a = lo - pad, b = hi + pad;
+  const at = (v: number) => `${Math.min(100, Math.max(0, ((v - a) / (b - a)) * 100))}%`;
 
   const cols: Col<SRow>[] = [
     { key: "label", label: "Perhitungan" },
@@ -145,37 +150,70 @@ function EvaluationView({ e }: { e: Evaluation }) {
   ];
 
   return (
-    <>
-      {e.warnings.length > 0 && (
-        <div className="banner" role="alert">
-          <ul>{e.warnings.map((w) => <li key={w}>{w}</li>)}</ul>
-        </div>
-      )}
-      <div className="kpis">
-        <Kpi label="Sharpe (bobot sekarang)" value={num(now.sharpe, 2)} tone={tone(now.sharpe)} hint={VERDICTS[now.verdict]} />
-        <Kpi label="Rata-rata korelasi" value={num(e.correlation.average, 2)} hint="Rata-rata korelasi berpasangan antar saham" />
-        <Kpi label="Jumlah saham" value={e.correlation.tickers.length} />
-        <Kpi label="Data per" value={day(e.as_of)} hint={e.window ? `Jendela ${e.window.weeks} minggu` : "Estimasi dari statistik universe"} />
-      </div>
-
-      <Section title="Sharpe ratio">
-        {plotted.length > 0 && <Chart option={sOpt} height={70 + 44 * plotted.length} label="Sharpe ratio dengan selang kepercayaan 95%" />}
+    <Section title="Sharpe ratio" className="pf-sharpe">
+      <ul className="rngs">
+        {rows.map((r) => (
+          <li key={r.label}>
+            <div className="rng-head"><span>{r.label}</span><strong className={tone(r.b.sharpe)}>{num(r.b.sharpe, 2)}</strong></div>
+            {ok(r) ? (
+              <>
+                <div
+                  className="rng-track" role="img"
+                  aria-label={`${r.label}: Sharpe ${num(r.b.sharpe, 2)}, selang 95% ${num(r.b.ci_low, 2)} sampai ${num(r.b.ci_high, 2)}`}
+                >
+                  <i className="rng-zero" style={{ left: at(0) }} />
+                  <i className="rng-ci" style={{ left: at(r.b.ci_low as number), width: `${(((r.b.ci_high as number) - (r.b.ci_low as number)) / (b - a)) * 100}%` }} />
+                  <i className="rng-dot" style={{ left: at(r.b.sharpe as number) }} />
+                </div>
+                <div className="rng-foot">
+                  <span>{num(r.b.ci_low, 2)}</span>
+                  <Chip kind={r.b.verdict}>{VERDICT_SHORT[r.b.verdict]}</Chip>
+                  <span>{num(r.b.ci_high, 2)}</span>
+                </div>
+              </>
+            ) : (
+              <p className="muted">Tidak dapat dihitung (n={r.b.n_obs}).</p>
+            )}
+          </li>
+        ))}
+      </ul>
+      <p className="muted small">
+        Batang menunjukkan selang kepercayaan 95%, garis putus-putus adalah nol. Jika batang melewati nol, hasilnya belum dapat dibedakan dari suku bunga bebas risiko.
+      </p>
+      <details className="more">
+        <summary>Rincian perhitungan</summary>
         <DataTable cols={cols} rows={rows} />
-        <p className="muted">
-          Garis menunjukkan selang kepercayaan 95%. Jika selang melewati nol, hasilnya belum dapat dibedakan dari suku bunga bebas risiko.
+        <p className="muted small">
           “Bobot sekarang” mengandaikan bobot hari ini konstan selama jendela data, sedangkan “Sejak beli” memakai return yang benar-benar terjadi.
         </p>
-      </Section>
+      </details>
+    </Section>
+  );
+}
 
-      <div className="two">
-        <Section title="Bobot dan kontribusi risiko">
-          <Chart option={wOpt} height={320} label="Bobot dan kontribusi risiko tiap saham" />
-        </Section>
-        <Section title="Korelasi antar saham">
-          <CorrelationTable e={e} />
-        </Section>
+function AllocationSection({ e }: { e: Evaluation }) {
+  const items = Object.keys(e.weights)
+    .map((t) => ({ t, w: e.weights[t] ?? 0, r: e.risk_contribution[t] ?? 0 }))
+    .sort((x, y) => y.w - x.w);
+  return (
+    <Section title="Alokasi dan risiko" className="pf-alloc">
+      <ul className="alloc">
+        {items.map(({ t, w, r }) => (
+          <li key={t}>
+            <strong>{t}</strong>
+            <div className="bars" role="img" aria-label={`${t}: bobot ${pct(w, 1)}, kontribusi risiko ${pct(r, 1)}`}>
+              <i className="bar bw" style={{ width: `${Math.max(0, Math.min(100, w * 100))}%` }} />
+              <i className="bar br" style={{ width: `${Math.max(0, Math.min(100, r * 100))}%` }} />
+            </div>
+            <span className="nums">{pct(w, 1)} <small>· risiko {pct(r, 1)}</small></span>
+          </li>
+        ))}
+      </ul>
+      <div className="legend">
+        <span><i className="sw bw" />Bobot</span>
+        <span><i className="sw br" />Kontribusi risiko</span>
       </div>
-    </>
+    </Section>
   );
 }
 
@@ -198,15 +236,16 @@ function CorrelationTable({ e }: { e: Evaluation }) {
           </tbody>
         </table>
       </div>
-      <p className="muted">
+      <p className="muted small">
         Return mingguan{e.window ? `, ${e.window.weeks} minggu` : ""}. Rata-rata berpasangan {num(average, 2)}. Semakin rendah, semakin menyebar risikonya.
       </p>
     </>
   );
 }
 
-// ------------------------------------------------------------------ posisi
-function HoldingsSection({ name, holdings }: { name: string; holdings: Holding[] }) {
+function PositionsSection({ name, holdings, adding, setAdding }: {
+  name: string; holdings: Holding[]; adding: boolean; setAdding: (v: boolean) => void;
+}) {
   const { remove } = usePortfolioMutations(name);
   const cols: Col<Holding>[] = [
     { key: "ticker", label: "Ticker" },
@@ -225,22 +264,29 @@ function HoldingsSection({ name, holdings }: { name: string; holdings: Holding[]
     },
   ];
   return (
-    <Section title={`Posisi di “${name}”`}>
-      {holdings.length > 0 && <DataTable cols={cols} rows={holdings} />}
+    <Section
+      title="Posisi" className="pf-hold"
+      action={<button className={adding ? "" : "primary"} onClick={() => setAdding(!adding)}>{adding ? "Tutup" : "+ Tambah posisi"}</button>}
+    >
+      {adding && <AddHolding name={name} onDone={() => setAdding(false)} />}
+      <DataTable cols={cols} rows={holdings} />
       {remove.isError && <p className="down" role="alert">{remove.error.message}</p>}
-      <AddHolding name={name} />
     </Section>
   );
 }
 
-function AddHolding({ name }: { name: string }) {
+function AddHolding({ name, onDone }: { name: string; onDone?: () => void }) {
   const { add } = usePortfolioMutations(name);
   const [ticker, setTicker] = useState("");
   const [lots, setLots] = useState("");
   const [date, setDate] = useState("");
+  const today = new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
   const submit = (ev: FormEvent) => {
     ev.preventDefault();
-    add.mutate({ ticker: ticker.trim(), lots: Number(lots), buy_date: date }, { onSuccess: () => { setTicker(""); setLots(""); } });
+    add.mutate(
+      { ticker: ticker.trim(), lots: Number(lots), buy_date: date },
+      { onSuccess: () => { setTicker(""); setLots(""); onDone?.(); } },
+    );
   };
   return (
     <form className="formgrid" onSubmit={submit}>
@@ -248,22 +294,21 @@ function AddHolding({ name }: { name: string }) {
         <input required value={ticker} onChange={(e) => setTicker(e.target.value)} placeholder="mis. BBCA" autoComplete="off" />
       </label>
       <label className="field"><span>Lot</span>
-        <input required type="number" min={0.01} step={0.01} value={lots} onChange={(e) => setLots(e.target.value)} />
+        <input required type="number" inputMode="decimal" min={0.01} step={0.01} value={lots} onChange={(e) => setLots(e.target.value)} />
       </label>
       <label className="field"><span>Tanggal beli</span>
-        <input required type="date" max={new Date().toISOString().slice(0, 10)} value={date} onChange={(e) => setDate(e.target.value)} />
+        <input required type="date" max={today} value={date} onChange={(e) => setDate(e.target.value)} />
       </label>
-      <button className="primary" type="submit" disabled={add.isPending}>{add.isPending ? "Menyimpan…" : "Tambah posisi"}</button>
+      <button className="primary" type="submit" disabled={add.isPending}>{add.isPending ? "Menyimpan…" : "Simpan posisi"}</button>
       {add.isError && <p className="down" role="alert">{add.error.message}</p>}
     </form>
   );
 }
 
-// ------------------------------------------------------------------ riwayat
 function HistorySection({ name }: { name: string }) {
   const q = useHistory(name);
   return (
-    <Section title="Riwayat evaluasi tersimpan">
+    <Section title="Riwayat evaluasi tersimpan" className="pf-history">
       <Async q={q} isEmpty={(d) => d.x.length === 0 && "Belum ada riwayat. Riwayat terisi saat python daily.py --only portfolio atau python portfolio_cli.py evaluate-all dijalankan."}>
         {(h) => <HistoryView h={h} />}
       </Async>

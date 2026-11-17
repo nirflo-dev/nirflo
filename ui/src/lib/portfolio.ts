@@ -35,8 +35,8 @@ export const usePortfolios = () =>
 export const useHoldings = (name: string) =>
   useQuery({ queryKey: ["pf", "holdings", name], queryFn: ({ signal }) => api<Holding[]>(`/portfolio/${enc(name)}/holdings`, undefined, { signal }), staleTime: 60_000, retry: 0 });
 
-export const useEvaluation = (name: string, mode: string) =>
-  useQuery({ queryKey: ["pf", "eval", name, mode], queryFn: ({ signal }) => api<Evaluation>(`/portfolio/${enc(name)}/evaluate`, { mode }, { signal }), staleTime: 5 * 60_000, retry: 0 });
+export const useEvaluation = (name: string, mode: string, enabled = true) =>
+  useQuery({ queryKey: ["pf", "eval", name, mode], queryFn: ({ signal }) => api<Evaluation>(`/portfolio/${enc(name)}/evaluate`, { mode }, { signal }), staleTime: 5 * 60_000, retry: 0, enabled });
 
 export const useHistory = (name: string) =>
   useQuery({ queryKey: ["pf", "history", name], queryFn: ({ signal }) => api<PfHistory>(`/portfolio/${enc(name)}/history`, undefined, { signal }), staleTime: 5 * 60_000, retry: 0 });

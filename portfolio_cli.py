@@ -72,7 +72,7 @@ def print_report(name, result):
 
 
 def load_inputs(portfolio):
-    holdings = store.list_holdings(portfolio)
+    holdings = store.list_holdings(portfolio, user_id=store.default_user_id())
     if holdings.empty:
         sys.exit(f"portofolio '{portfolio}' kosong, isi dulu dengan perintah add atau import")
     tickers = sorted(holdings["ticker"].unique())
@@ -85,11 +85,11 @@ def load_inputs(portfolio):
 
 def cmd_init(args):
     store.ensure_table()
-    print("tabel portfolio_holdings dan portfolio_evaluations siap")
+    print("tabel users, portfolios, portfolio_holdings, dan portfolio_evaluations siap")
 
 
 def cmd_add(args):
-    store.add_holdings(args.portfolio, [(args.ticker, args.lots, args.date)])
+    store.add_holdings(args.portfolio, [(args.ticker, args.lots, args.date)], store.default_user_id())
     print("ditambahkan")
 
 
@@ -99,45 +99,7 @@ def cmd_import(args):
     if missing:
         sys.exit("kolom CSV belum ada: " + ", ".join(sorted(missing)))
     rows = frame[["ticker", "lots", "buy_date"]].itertuples(index=False, name=None)
-    print(f"{store.add_holdings(args.portfolio, rows)} baris ditambahkan")
-
-
-def cmd_list(args):
-    df = store.list_holdings(args.portfolio)
-    if df.empty:
-        print("belum ada holdings")
-        return
-    df["buy_date"] = df["buy_date"].dt.strftime("%Y-%m-%d")
-    print(df.to_string(index=False))
-
-
-def cmd_remove(args):
-    print("dihapus" if store.remove_holding(args.id) else "id tidak ditemukan")
-
-
-def cmd_check(args):
-    holdings, prices, no_trade = load_inputs(args.portfolio)
-    daily = prices.sort_index().pct_change(fill_method=None)
-    rows = []
-    for ticker in sorted(holdings["ticker"].unique()):
-        if ticker not in prices.columns or prices[ticker].dropna().empty:
-            rows.append({"ticker": ticker, "catatan": "tidak ada data harga"})
-            continue
-        series = prices[ticker].dropna()
-        moves = daily[ticker].dropna()
-        worst = moves.abs().idxmax() if not moves.empty else None
-        rows.append(
-            {
-                "ticker": ticker,
-                "data_pertama": series.index[0].date(),
-                "data_terakhir": series.index[-1].date(),
-                "hari": len(series),
-                "tanpa_transaksi": pct(no_trade.get(ticker), 0),
-                "gerak_terbesar": pct(moves[worst]) if worst is not None else "n/a",
-                "tanggalnya": worst.date() if worst is not None else None,
-            }
-        )
-    print(pd.DataFrame(rows).fillna("").to_string(index=False))
+    print(f"{store.add_holdings(args.portfolio, rows, store.default_user_id())} baris ditambahkan")
 
 
 def cmd_evaluate(args):
@@ -145,7 +107,7 @@ def cmd_evaluate(args):
     result = evaluate(prices, holdings, load_macro_series("ID_RATE"), no_trade)
     print_report(args.portfolio, result)
     if args.save:
-        store.save_evaluation(args.portfolio, result)
+        store.save_evaluation(args.portfolio, result, store.default_user_id())
         print("hasil disimpan ke portfolio_evaluations")
     if args.json:
         with open(args.json, "w", encoding="utf-8") as f:
@@ -165,32 +127,33 @@ def cmd_evaluate_all(args):
     except (ValueError, RuntimeError) as exc:
         sys.exit(f"gagal membaca data: {exc}")
     failed = 0
-    for name, holdings in holdings_all.groupby("portfolio"):
+    for (user_id, name), holdings in holdings_all.groupby(["user_id", "portfolio"]):
+        label = f"user {user_id} / {name}"
         try:
             result = evaluate(prices, holdings, rf, no_trade)
-            store.save_evaluation(name, result)
+            store.save_evaluation(name, result, int(user_id))
             print(
-                f"{name}: per {result['as_of']} | "
+                f"{label}: per {result['as_of']} | "
                 f"Sharpe {num(result['sharpe']['current_weights']['sharpe'])} | "
                 f"korelasi {num(result['correlation']['average'])} | "
                 f"peringatan {len(result['warnings'])}"
             )
         except ValueError as exc:
             failed += 1
-            print(f"{name}: GAGAL - {exc}")
+            print(f"{label}: GAGAL - {exc}")
     if failed:
         sys.exit(1)
 
 
 def cmd_history(args):
-    df = store.list_evaluations(args.portfolio, args.limit)
+    df = store.list_evaluations(args.portfolio, args.limit, store.default_user_id())
     if df.empty:
         print("belum ada riwayat evaluasi")
         return
     print(df.round(2).to_string(index=False))
 
 def cmd_quick(args):
-    holdings = store.list_holdings(args.portfolio)
+    holdings = store.list_holdings(args.portfolio, user_id=store.default_user_id())
     if holdings.empty:
         sys.exit(f"portofolio '{args.portfolio}' kosong")
     tickers = sorted(holdings["ticker"].unique())

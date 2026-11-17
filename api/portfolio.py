@@ -1,4 +1,4 @@
-"""Portfolio endpoints: holdings, evaluation (full and quick) and stored history."""
+"""Portfolio endpoints: holdings, evaluation (full and quick) and stored history. Data per akun."""
 from __future__ import annotations
 
 import math
@@ -7,18 +7,27 @@ from datetime import date
 
 import numpy as np
 import psycopg2
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from psycopg2 import errors as pg_errors
 from pydantic import BaseModel, Field
 
 from analytics.portfolio import LOT_SIZE, evaluate
+from api.auth import clerk_display_name, current_clerk_id
 from api.main import Json, ttl_cache  # file ini di-include di akhir api/main.py, setelah Json terdefinisi
 from core import history as hist
 from core import portfolio_store as store
-from core import universe_store
+from core import universe_store, user_store
 from core.portfolio_data import load_macro_series, load_price_inputs
 
 router = APIRouter(prefix="/api/portfolio")
 _ready = False
+_user_ids: dict[str, int] = {}
+
+SCHEMA_HINT = (
+    "Skema tabel pengguna atau portofolio belum sesuai dengan kode. "
+    "Hapus tabel lama (portfolio_evaluations, portfolio_holdings, portfolios, users) "
+    "lalu jalankan: python portfolio_cli.py init"
+)
 
 
 @contextmanager
@@ -34,8 +43,23 @@ def handled():
         yield
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+    except (pg_errors.UndefinedTable, pg_errors.UndefinedColumn, pg_errors.InvalidColumnReference) as exc:
+        raise HTTPException(503, SCHEMA_HINT) from exc
     except psycopg2.OperationalError as exc:
         raise HTTPException(503, f"Database tidak terjangkau: {str(exc).strip()}") from exc
+
+
+def current_user(clerk_id: str = Depends(current_clerk_id)) -> int:
+    user_id = _user_ids.get(clerk_id)
+    if user_id is None:
+        with handled():
+            user_id, name = user_store.ensure_user(clerk_id)
+            if name is None:
+                fetched = clerk_display_name(clerk_id)
+                if fetched:
+                    user_store.set_display_name(user_id, fetched)
+        _user_ids[clerk_id] = user_id
+    return user_id
 
 
 def _clean_name(name: str) -> str:
@@ -45,16 +69,16 @@ def _clean_name(name: str) -> str:
     return name
 
 
-def _require_holdings(name: str):
-    holdings = store.list_holdings(name)
+def _require_holdings(user_id: int, name: str):
+    holdings = store.list_holdings(name, user_id=user_id)
     if holdings.empty:
         raise ValueError(f"Portofolio '{name}' kosong. Tambahkan posisi terlebih dahulu.")
     return holdings
 
 
 @ttl_cache(300)
-def full_evaluation(name: str) -> dict:
-    holdings = _require_holdings(name)
+def full_evaluation(user_id: int, name: str) -> dict:
+    holdings = _require_holdings(user_id, name)
     tickers = sorted(holdings["ticker"].unique())
     prices, no_trade = load_price_inputs(tickers, holdings["buy_date"].min())
     return evaluate(prices, holdings, load_macro_series("ID_RATE"), no_trade)
@@ -65,9 +89,9 @@ def _verdict(low: float, high: float) -> str:
 
 
 @ttl_cache(300)
-def quick_evaluation(name: str) -> dict:
+def quick_evaluation(user_id: int, name: str) -> dict:
     """Estimasi dari statistik universe, tanpa membaca harga. Logika sama dengan cmd_quick di portfolio_cli.py."""
-    holdings = _require_holdings(name)
+    holdings = _require_holdings(user_id, name)
     tickers = sorted(holdings["ticker"].unique())
     as_of, stats = universe_store.read_stats(tickers)
     if as_of is None:
@@ -130,9 +154,9 @@ class NewHolding(BaseModel):
 
 
 @router.get("")
-def portfolios():
+def portfolios(user: int = Depends(current_user)):
     with handled():
-        df = store.list_holdings()
+        df = store.list_holdings(user_id=user)
     if df.empty:
         return Json([])
     rows = [
@@ -143,42 +167,42 @@ def portfolios():
 
 
 @router.get("/{name}/holdings")
-def holdings(name: str):
+def holdings(name: str, user: int = Depends(current_user)):
     with handled():
-        df = store.list_holdings(_clean_name(name))
-    df = df.assign(buy_date=df["buy_date"].dt.strftime("%Y-%m-%d"))
+        df = store.list_holdings(_clean_name(name), user_id=user)
+    df = df.drop(columns=["user_id"]).assign(buy_date=df["buy_date"].dt.strftime("%Y-%m-%d"))
     return Json(df.to_dict("records"))
 
 
 @router.post("/{name}/holdings")
-def add_holding(name: str, body: NewHolding):
+def add_holding(name: str, body: NewHolding, user: int = Depends(current_user)):
     with handled():
-        added = store.add_holdings(_clean_name(name), [(body.ticker, body.lots, body.buy_date.isoformat())])
+        added = store.add_holdings(_clean_name(name), [(body.ticker, body.lots, body.buy_date.isoformat())], user)
     _invalidate()
     return Json({"added": added})
 
 
 @router.delete("/holdings/{holding_id}")
-def remove_holding(holding_id: int):
+def remove_holding(holding_id: int, user: int = Depends(current_user)):
     with handled():
-        if not store.remove_holding(holding_id):
-            raise HTTPException(404, "Posisi tidak ditemukan.")
+        if not store.remove_holding(holding_id, user_id=user):
+            raise HTTPException(404, "Posisi tidak ditemukan.")  # pesan sama untuk id milik akun lain
     _invalidate()
     return Json({"removed": holding_id})
 
 
 @router.get("/{name}/evaluate")
-def evaluate_portfolio(name: str, mode: str = Query("full", pattern="^(full|quick)$")):
+def evaluate_portfolio(name: str, mode: str = Query("full", pattern="^(full|quick)$"), user: int = Depends(current_user)):
     name = _clean_name(name)
     with handled():
-        data = full_evaluation(name) if mode == "full" else quick_evaluation(name)
+        data = full_evaluation(user, name) if mode == "full" else quick_evaluation(user, name)
     return Json({"mode": mode, **data})
 
 
 @router.get("/{name}/history")
-def history(name: str, limit: int = Query(60, ge=1, le=500)):
+def history(name: str, limit: int = Query(60, ge=1, le=500), user: int = Depends(current_user)):
     with handled():
-        df = store.list_evaluations(_clean_name(name), limit).sort_values("as_of")
+        df = store.list_evaluations(_clean_name(name), limit, user).sort_values("as_of")
     return Json({
         "x": [d.isoformat() for d in df["as_of"]],
         "sharpe_since_buy": df["sharpe_since_buy"].tolist(),
