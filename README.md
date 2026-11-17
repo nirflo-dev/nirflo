@@ -1,4 +1,4 @@
-﻿# Nirflo
+﻿# Infinity
 
 A quantitative research terminal for Indonesian equities (IDX). It collects financial filings and prices, scores earnings-driven signals, evaluates how those signals performed, and shows the results in a local web dashboard.
 
