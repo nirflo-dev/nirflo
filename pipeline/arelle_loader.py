@@ -1184,7 +1184,7 @@ def process_hybrid(year: int, period: str, tickers=None) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Mintigo XBRL bridge data loader")
+    parser = argparse.ArgumentParser(description="Nirflo XBRL bridge data loader")
     parser.add_argument(
         "--inspect",
         nargs=3,

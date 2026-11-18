@@ -22,7 +22,7 @@ function EmitenView({ list, ticker }: { list: Ticker[]; ticker?: string }) {
   const [tab, setTab] = useParam("tab", "harga");
   const current = list.find((t) => t.ticker === ticker?.toUpperCase());
   useEffect(() => {
-    if (current) { store.set("ticker", current.ticker); document.title = `${current.ticker} · Mintigo`; }
+    if (current) { store.set("ticker", current.ticker); document.title = `${current.ticker} · Nirflo`; }
   }, [current]);
 
   if (!ticker) {

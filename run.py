@@ -755,7 +755,7 @@ COMMANDS = ("fetch", "report", "prices", "performance")
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Mintigo PEAD pipeline. With no command every step runs: fetch new "
+        description="Nirflo PEAD pipeline. With no command every step runs: fetch new "
         "filings, report and log signals, update prices, report signal performance."
     )
     parser.add_argument(

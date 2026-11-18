@@ -6,6 +6,7 @@ import { ClerkProvider } from "@clerk/react";
 import App from "./App";
 import { AuthGate } from "./components/AuthGate";
 import "./styles.css";
+import "./layout.css";
 
 const client = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } } });
 const clerkKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string;
@@ -15,13 +16,13 @@ createRoot(document.getElementById("root")!).render(
       <ClerkProvider
       publishableKey={clerkKey}
       afterSignOutUrl="/"
-      appearance={{
+            appearance={{
         variables: {
           colorBackground: "#161b22",
-          colorText: "#e6edf3",
-          colorTextSecondary: "#8b949e",
-          colorInputBackground: "#0d1117",
-          colorInputText: "#e6edf3",
+          colorForeground: "#e6edf3",
+          colorMutedForeground: "#8b949e",
+          colorInput: "#0d1117",
+          colorInputForeground: "#e6edf3",
           colorPrimary: "#2f81f7",
           colorNeutral: "#e6edf3",
           borderRadius: "10px",

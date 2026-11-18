@@ -1,7 +1,9 @@
 import { Component, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { downloadCsv, num } from "../lib/format";
+import { store } from "../lib/hooks";
 import type { TableData } from "../lib/types";
+import { Icon } from "./Icon";
 
 export const Loading = ({ label = "Memuat…" }: { label?: string }) => (
   <div className="state" role="status" aria-live="polite"><span className="spin" aria-hidden />{label}</div>
@@ -18,7 +20,6 @@ export function ErrorState({ error, retry }: { error: unknown; retry?: () => voi
   );
 }
 
-/** Menangkap error saat render sehingga halaman tidak kosong total. */
 export class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
   static getDerivedStateFromError(error: Error) { return { error }; }
@@ -37,7 +38,6 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
   }
 }
 
-/** Satu pola untuk loading / error / kosong / data. Data lama tetap tampil (redup) saat parameter berubah. */
 export function Async<R>({ q, isEmpty, children }: {
   q: UseQueryResult<R>; isEmpty?: (d: R) => string | false; children: (d: R) => ReactNode;
 }) {
@@ -76,14 +76,31 @@ export function Tabs({ value, tabs, onChange }: { value: string; tabs: { id: str
   );
 }
 
-export const Section = ({ title, children, className = "", action }: { title: string; children: ReactNode; className?: string; action?: ReactNode }) => (
-  <section className={`card ${className}`.trim()}>
-    <div className="card-head"><h3>{title}</h3>{action}</div>
-    {children}
-  </section>
-);
+export function Section({ title, children, className = "", action, collapsible = false, id }: {
+  title: string; children: ReactNode; className?: string; action?: ReactNode; collapsible?: boolean; id?: string;
+}) {
+  const key = id ? `sec:${id}` : null;
+  const [closed, setClosed] = useState(() => collapsible && key !== null && store.get(key) === "1");
+  const toggle = () => {
+    const next = !closed;
+    setClosed(next);
+    if (key) store.set(key, next ? "1" : "0");
+  };
+  return (
+    <section className={`card ${className}${closed ? " closed" : ""}`.trim()}>
+      <div className="card-head">
+        <h3>
+          {collapsible
+            ? <button type="button" className="head-toggle" aria-expanded={!closed} onClick={toggle}><Icon name="down" size={16} />{title}</button>
+            : title}
+        </h3>
+        {action}
+      </div>
+      {!closed && children}
+    </section>
+  );
+}
 
-/** Input angka: nilai dikomit saat Enter/blur, jadi mengetik tidak memicu hitung ulang di tiap tombol. */
 export function NumberField({ label, value, onChange, min, max, step, hint }: {
   label: string; value: number; onChange: (v: number) => void; min: number; max: number; step: number; hint?: string;
 }) {
@@ -117,7 +134,6 @@ export function TextField({ label, value, onChange, placeholder }: { label: stri
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Col<R> = { key: string; label: string; get?: (r: R) => unknown; fmt?: (v: any, r: R) => ReactNode; num?: boolean };
 const val = <R,>(c: Col<R>, r: R) => (c.get ? c.get(r) : (r as Record<string, unknown>)[c.key]);
 
@@ -131,9 +147,8 @@ export function DataTable<R extends object>({ cols, rows, pageSize = 50, csv, so
     const c = cols.find((x) => x.key === sort?.key);
     if (!c || !sort) return rows;
     return [...rows].sort((a, b) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const x = val(c, a) as any, y = val(c, b) as any;
-      if (x == null || y == null) return x == null ? (y == null ? 0 : 1) : -1; // null selalu di bawah
+      if (x == null || y == null) return x == null ? (y == null ? 0 : 1) : -1;
       return (x > y ? 1 : x < y ? -1 : 0) * sort.dir;
     });
   }, [rows, cols, sort]);
@@ -181,8 +196,6 @@ export function DataTable<R extends object>({ cols, rows, pageSize = 50, csv, so
   );
 }
 
-/** Tabel generik dari payload {columns, rows} milik API. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function DataGrid({ data, fmt = {}, csv }: { data: TableData; fmt?: Record<string, (v: any) => ReactNode>; csv?: string }) {
   const first = data.rows[0] ?? {};
   const cols: Col<Record<string, unknown>>[] = data.columns.map((k) => ({

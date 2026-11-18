@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
 import { day, num, pct, tone } from "../lib/format";
-import { useColors, useParam } from "../lib/hooks";
+import { useColors, useParam, useSplit } from "../lib/hooks";
 import {
   useEvaluation, useHistory, useHoldings, usePortfolioMutations, usePortfolios,
   type Evaluation, type Holding, type PfHistory, type SharpeBlock,
@@ -34,6 +34,7 @@ export default function PortfolioPage() {
   const e = hasHoldings ? ev.data : undefined;
   const count = e?.correlation.tickers.length ?? 0;
   const gridClass = ["pf-grid", e ? "" : "solo", e && count < 2 ? "nocorr" : ""].filter(Boolean).join(" ");
+  const split = useSplit("pf-split", 0.5, 0.3, 0.7);
 
   useEffect(() => setAdding(false), [name]);
 
@@ -64,11 +65,16 @@ export default function PortfolioPage() {
             {ev.isPending && <Loading label="Menghitung evaluasi…" />}
             {ev.isError && <ErrorState error={ev.error} retry={() => ev.refetch()} />}
             {e && <Summary e={e} />}
-            <div className={gridClass}>
+            <div
+              ref={split.ref} className={gridClass}
+              style={{ "--cols": `minmax(0,${split.p.toFixed(3)}fr) 14px minmax(0,${(1 - split.p).toFixed(3)}fr)` } as CSSProperties}
+            >
               {e && <SharpeSection e={e} />}
+              {e && <div className="split pf-gap1" title="Geser untuk mengubah lebar, klik dua kali untuk reset" {...split.handle} />}
               {e && <AllocationSection e={e} />}
               <PositionsSection name={name} holdings={rows} adding={adding} setAdding={setAdding} />
-              {e && count > 1 && <Section title="Korelasi antar saham" className="pf-corr"><CorrelationTable e={e} /></Section>}
+              {e && count > 1 && <div className="split pf-gap2" title="Geser untuk mengubah lebar, klik dua kali untuk reset" {...split.handle} />}
+              {e && count > 1 && <Section title="Korelasi antar saham" className="pf-corr" collapsible id="pf-corr"><CorrelationTable e={e} /></Section>}
             </div>
           </>
         )}
@@ -150,7 +156,7 @@ function SharpeSection({ e }: { e: Evaluation }) {
   ];
 
   return (
-    <Section title="Sharpe ratio" className="pf-sharpe">
+    <Section title="Sharpe ratio" className="pf-sharpe" collapsible id="pf-sharpe">
       <ul className="rngs">
         {rows.map((r) => (
           <li key={r.label}>
@@ -196,7 +202,7 @@ function AllocationSection({ e }: { e: Evaluation }) {
     .map((t) => ({ t, w: e.weights[t] ?? 0, r: e.risk_contribution[t] ?? 0 }))
     .sort((x, y) => y.w - x.w);
   return (
-    <Section title="Alokasi dan risiko" className="pf-alloc">
+    <Section title="Alokasi dan risiko" className="pf-alloc" collapsible id="pf-alloc">
       <ul className="alloc">
         {items.map(({ t, w, r }) => (
           <li key={t}>
@@ -265,7 +271,7 @@ function PositionsSection({ name, holdings, adding, setAdding }: {
   ];
   return (
     <Section
-      title="Posisi" className="pf-hold"
+      title="Posisi" className="pf-hold" collapsible id="pf-hold"
       action={<button className={adding ? "" : "primary"} onClick={() => setAdding(!adding)}>{adding ? "Tutup" : "+ Tambah posisi"}</button>}
     >
       {adding && <AddHolding name={name} onDone={() => setAdding(false)} />}
@@ -308,7 +314,7 @@ function AddHolding({ name, onDone }: { name: string; onDone?: () => void }) {
 function HistorySection({ name }: { name: string }) {
   const q = useHistory(name);
   return (
-    <Section title="Riwayat evaluasi tersimpan" className="pf-history">
+    <Section title="Riwayat evaluasi tersimpan" className="pf-history" collapsible id="pf-history">
       <Async q={q} isEmpty={(d) => d.x.length === 0 && "Belum ada riwayat. Riwayat terisi saat python daily.py --only portfolio atau python portfolio_cli.py evaluate-all dijalankan."}>
         {(h) => <HistoryView h={h} />}
       </Async>

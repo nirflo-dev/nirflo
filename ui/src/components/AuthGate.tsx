@@ -12,6 +12,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
     if (isLoaded && !isSignedIn) qc.clear();
   }, [isLoaded, isSignedIn, qc]);
   if (!isLoaded) return <Loading />;
-  if (!isSignedIn) return <div className="login"><SignIn routing="hash" /></div>;
+    if (!isSignedIn) {
+    return (
+      <div className="login">
+        <div className="login-brand">Nirflo</div>
+        <p className="login-tag">Riset dan risiko portofolio saham Indonesia</p>
+        <SignIn routing="hash" />
+      </div>
+    );
+  }
   return <>{children}</>;
 }
