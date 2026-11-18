@@ -55,5 +55,9 @@ export function usePortfolioMutations(name: string) {
     mutationFn: (id: number) => api(`/portfolio/holdings/${id}`, undefined, { method: "DELETE" }),
     onSuccess: refresh,
   });
-  return { add, remove };
+  const snapshot = useMutation({
+    mutationFn: () => api(`/portfolio/${enc(name)}/history`, undefined, { method: "POST" }),
+    onSuccess: refresh,
+  });
+  return { add, remove, snapshot };
 }

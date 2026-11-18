@@ -211,3 +211,15 @@ def history(name: str, limit: int = Query(60, ge=1, le=500), user: int = Depends
         "avg_correlation": df["avg_correlation"].tolist(),
         "warnings": df["warnings"].tolist(),
     })
+
+
+@router.post("/{name}/history")
+def save_snapshot(name: str, user: int = Depends(current_user)):
+    name = _clean_name(name)
+    with handled():
+        result = full_evaluation(user, name)
+        blocks = result["sharpe"]
+        if blocks.get("since_buy") is None or blocks.get("equal_weight") is None:
+            raise ValueError("Evaluasi lengkap belum dapat dihitung untuk portofolio ini.")
+        store.save_evaluation(name, result, user)
+    return Json({"saved": result["as_of"]})

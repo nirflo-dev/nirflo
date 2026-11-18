@@ -36,8 +36,8 @@ function rank(list: Ticker[], query: string): Ticker[] {
   return [...starts, ...has, ...sector].slice(0, 8);
 }
 
-export function TickerSearch({ label = "Cari emiten", placeholder = "Kode atau sektor, mis. BBCA", compact = false, globalKey = false, onPick }: {
-  label?: string; placeholder?: string; compact?: boolean; globalKey?: boolean; onPick?: (ticker: string) => void;
+export function TickerSearch({ label = "Cari emiten", placeholder = "Kode atau sektor, mis. BBCA", compact = false, globalKey = false, remember = true, onPick }: {
+  label?: string; placeholder?: string; compact?: boolean; globalKey?: boolean; remember?: boolean; onPick?: (ticker: string) => void;
 }) {
   const nav = useNavigate();
   const q = useTickers();
@@ -90,7 +90,7 @@ export function TickerSearch({ label = "Cari emiten", placeholder = "Kode atau s
     setText("");
     setOpen(false);
     inputRef.current?.blur();
-    if (onPick) onPick(t.ticker);
+    if (remember) pushRecent(t.ticker);
     else nav(`/emiten/${t.ticker}`);
   };
 
@@ -125,6 +125,7 @@ export function TickerSearch({ label = "Cari emiten", placeholder = "Kode atau s
             aria-activedescendant={open && items[active] ? `${uid}-${items[active].ticker}` : undefined}
             value={text} placeholder={placeholder} autoComplete="off" spellCheck={false}
             onFocus={() => setOpen(true)} onChange={(e) => { setText(e.target.value); setOpen(true); }} onKeyDown={onKeyDown}
+            aria-label={label}
           />
           {globalKey && !text && <kbd>/</kbd>}
         </span>

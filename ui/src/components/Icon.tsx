@@ -9,7 +9,8 @@ const PATHS = {
   right: <><polyline points="13 17 18 12 13 7" /><polyline points="6 17 11 12 6 7" /></>,
   down: <polyline points="6 9 12 15 18 9" />,
   search: <><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></>,
-    panel: <><rect x="3" y="4" width="18" height="16" rx="2" /><line x1="15" y1="4" x2="15" y2="20" /></>,
+  panel: <><rect x="3" y="4" width="18" height="16" rx="2" /><line x1="15" y1="4" x2="15" y2="20" /></>,
+    arrow: <><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></>,
 } as const;
 
 export type IconName = keyof typeof PATHS;

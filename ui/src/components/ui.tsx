@@ -96,7 +96,9 @@ export function Section({ title, children, className = "", action, collapsible =
         </h3>
         {action}
       </div>
-      {!closed && children}
+      {collapsible
+        ? <div className="collapse" inert={closed}><div className="collapse-inner">{children}</div></div>
+        : children}
     </section>
   );
 }

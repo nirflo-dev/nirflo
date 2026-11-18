@@ -1,12 +1,18 @@
-import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { useTickers } from "../lib/api";
 import { day, num, pct, tone } from "../lib/format";
 import { useColors, useParam, useSplit } from "../lib/hooks";
+import { useCountUp, useMounted } from "../lib/motion";
 import {
   useEvaluation, useHistory, useHoldings, usePortfolioMutations, usePortfolios,
-  type Evaluation, type Holding, type PfHistory, type SharpeBlock,
+  type Evaluation, type Holding, type PfHistory, type PfSummary, type SharpeBlock,
 } from "../lib/portfolio";
 import { baseOption, Chart, line, X, Y, yName } from "../components/Chart";
-import { Async, Chip, DataTable, ErrorState, Kpi, Loading, Section, Segmented, type Col } from "../components/ui";
+import { Donut, type Slice } from "../components/Donut";
+import { Icon } from "../components/Icon";
+import { TickerSearch } from "../components/TickerSearch";
+import { Chip, DataTable, ErrorState, Section, Segmented, type Col } from "../components/ui";
+import "./portfolio.css";
 
 const VERDICTS: Record<SharpeBlock["verdict"], string> = {
   positif: "di atas suku bunga",
@@ -20,123 +26,464 @@ const VERDICT_SHORT: Record<SharpeBlock["verdict"], string> = {
   tidak_pasti: "Belum pasti",
   tidak_dapat_dihitung: "Tidak dapat dihitung",
 };
-const SHARPE_ROWS = [["since_buy", "Sejak beli"], ["current_weights", "Bobot sekarang"], ["equal_weight", "Sama rata"]] as const;
+const VERDICT_TEXT: Record<SharpeBlock["verdict"], string> = {
+  positif: "Imbal hasil melampaui suku bunga bebas risiko setelah memperhitungkan risiko.",
+  negatif: "Imbal hasil berada di bawah suku bunga bebas risiko setelah memperhitungkan risiko.",
+  tidak_pasti: "Belum dapat dibedakan dari suku bunga bebas risiko: selang kepercayaan melewati nol, jadi belum ada bukti yang kuat.",
+  tidak_dapat_dihitung: "Data belum cukup untuk menghitung Sharpe ratio.",
+};
+const SHARPE_ROWS = [
+  ["since_buy", "Sejak dibeli", "Memakai return yang benar-benar terjadi sejak tanggal beli."],
+  ["current_weights", "Bobot sekarang", "Mengandaikan komposisi hari ini konstan selama jendela data."],
+  ["equal_weight", "Dibagi sama rata", "Pembanding: setiap saham diberi bobot yang sama."],
+] as const;
+
+const clamp = (v: number | null | undefined) => `${Math.max(0, Math.min(100, (v ?? 0) * 100))}%`;
+const corrWord = (r: number) => (r < 0.3 ? "rendah" : r < 0.6 ? "sedang" : "tinggi");
+const relation = (r: number) => {
+  const a = Math.abs(r);
+  if (a < 0.2) return "nyaris tidak berkaitan";
+  return `${r > 0 ? "searah" : "berlawanan"}, ${a < 0.4 ? "lemah" : a < 0.7 ? "sedang" : "kuat"}`;
+};
+
+type Insight = { tone: "good" | "info" | "warn"; text: string };
+
+function insights(e: Evaluation, sectorOf: (t: string) => string | undefined): Insight[] {
+  const out: Insight[] = [];
+  const rows = Object.keys(e.weights).map((t) => ({ t, w: e.weights[t] ?? 0, r: e.risk_contribution[t] ?? 0 }));
+  if (rows.length === 1) {
+    out.push({ tone: "info", text: `Portofolio baru berisi satu saham (${rows[0].t}), sehingga risikonya sepenuhnya bergantung pada saham itu.` });
+  } else if (rows.length > 1) {
+    const top = [...rows].sort((a, b) => b.w - a.w)[0];
+    if (top.w >= 0.6) out.push({ tone: "warn", text: `${top.t} mendominasi ${pct(top.w, 0)} portofolio, sehingga hasilnya sangat bergantung pada satu saham.` });
+    else if (top.w >= 0.4) out.push({ tone: "info", text: `${top.t} adalah porsi terbesar (${pct(top.w, 0)}).` });
+    else out.push({ tone: "good", text: `Bobot relatif merata, porsi terbesar ${top.t} (${pct(top.w, 0)}).` });
+
+    const risky = [...rows].sort((a, b) => b.r - a.r)[0];
+    if (risky.r - risky.w >= 0.05) {
+      out.push({ tone: "warn", text: `${risky.t} menyumbang ${pct(risky.r, 1)} risiko dengan bobot ${pct(risky.w, 1)}.` });
+    }
+
+    const avg = e.correlation.average;
+    if (avg != null) {
+      if (avg < 0.3) out.push({ tone: "good", text: `Korelasi antar saham rendah (${num(avg, 2)}), jadi risiko cukup menyebar.` });
+      else if (avg < 0.6) out.push({ tone: "info", text: `Korelasi antar saham sedang (${num(avg, 2)}).` });
+      else out.push({ tone: "warn", text: `Korelasi antar saham tinggi (${num(avg, 2)}): saham cenderung bergerak bersamaan.` });
+    }
+
+    const bySector = new Map<string, number>();
+    for (const r of rows) {
+      const s = sectorOf(r.t) ?? "Unknown";
+      bySector.set(s, (bySector.get(s) ?? 0) + r.w);
+    }
+    const topSector = [...bySector.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (topSector && topSector[0] !== "Unknown" && topSector[1] >= 0.6) {
+      out.push({ tone: "info", text: `${pct(topSector[1], 0)} portofolio berada di sektor ${topSector[0]}.` });
+    }
+  }
+  return out.slice(0, 4);
+}
 
 export default function PortfolioPage() {
   const [name, setName] = useParam("p", "default");
   const [mode, setMode] = useParam("mode", "full");
   const [adding, setAdding] = useState(false);
+  const [hover, setHover] = useState<string | null>(null);
   const list = usePortfolios();
+  const tickers = useTickers();
   const holdings = useHoldings(name);
   const rows = holdings.data ?? [];
   const hasHoldings = rows.length > 0;
   const ev = useEvaluation(name, mode, hasHoldings);
   const e = hasHoldings ? ev.data : undefined;
   const count = e?.correlation.tickers.length ?? 0;
-  const gridClass = ["pf-grid", e ? "" : "solo", e && count < 2 ? "nocorr" : ""].filter(Boolean).join(" ");
-  const split = useSplit("pf-split", 0.5, 0.3, 0.7);
+  const split = useSplit("pf-split", 0.58, 0.4, 0.7);
+
+  const sectors = useMemo(() => new Map((tickers.data ?? []).map((t) => [t.ticker, t.sector])), [tickers.data]);
+  const sectorOf = (t: string) => sectors.get(t);
+  const order = useMemo(() => {
+    const ts = [...new Set((holdings.data ?? []).map((h) => h.ticker))];
+    const w = e?.weights;
+    return w ? ts.sort((a, b) => (w[b] ?? 0) - (w[a] ?? 0)) : ts.sort();
+  }, [holdings.data, e]);
+  const colorOf = (t: string) => `var(--s${(Math.max(0, order.indexOf(t)) % 8) + 1})`;
 
   useEffect(() => setAdding(false), [name]);
 
   return (
     <>
-      <header className="pf-head">
+      <header className="pfx-head">
         <div>
           <h2>Portofolio</h2>
           <p className="muted">{e ? `${count} saham · data per ${day(e.as_of)}` : "Kinerja dan risiko portofolio saham IDX."}</p>
         </div>
-        <div className="pf-controls">
-          <PortfolioPicker value={name} names={list.data?.map((p) => p.name) ?? []} onChange={setName} />
+        <div className="pfx-tools">
+          <PortfolioSwitcher value={name} items={list.data ?? []} onChange={setName} />
           <Segmented
             label="Mode perhitungan" value={mode} onChange={setMode}
             options={[{ value: "full", label: "Lengkap" }, { value: "quick", label: "Cepat" }]}
           />
+          {hasHoldings && (
+            <button className={adding ? "" : "primary"} onClick={() => setAdding(!adding)}>{adding ? "Tutup" : "+ Tambah posisi"}</button>
+          )}
         </div>
       </header>
       {mode === "quick" && (
-        <p className="muted">Mode cepat memakai statistik universe tanpa membaca harga. Hasilnya hanya Sharpe bobot sekarang, tanpa Sharpe sejak beli.</p>
+        <p className="muted">Mode cepat memakai statistik universe tanpa membaca harga. Hasilnya hanya Sharpe bobot sekarang, tanpa Sharpe sejak dibeli.</p>
       )}
 
-      {holdings.isPending ? <Loading />
+      {holdings.isPending ? <HeroSkeleton />
         : holdings.isError ? <ErrorState error={holdings.error} retry={() => holdings.refetch()} />
         : !hasHoldings ? <EmptyPortfolio name={name} />
         : (
           <>
-            {ev.isPending && <Loading label="Menghitung evaluasi…" />}
-            {ev.isError && <ErrorState error={ev.error} retry={() => ev.refetch()} />}
-            {e && <Summary e={e} />}
+            {e ? <Hero e={e} order={order} colorOf={colorOf} sectorOf={sectorOf} hover={hover} setHover={setHover} />
+              : ev.isPending ? <HeroSkeleton />
+              : ev.isError ? <ErrorState error={ev.error} retry={() => ev.refetch()} />
+              : null}
             <div
-              ref={split.ref} className={gridClass}
+              ref={split.ref} className={`pfx-grid${count > 1 ? "" : " nocorr"}`}
               style={{ "--cols": `minmax(0,${split.p.toFixed(3)}fr) 14px minmax(0,${(1 - split.p).toFixed(3)}fr)` } as CSSProperties}
             >
-              {e && <SharpeSection e={e} />}
-              {e && <div className="split pf-gap1" title="Geser untuk mengubah lebar, klik dua kali untuk reset" {...split.handle} />}
-              {e && <AllocationSection e={e} />}
-              <PositionsSection name={name} holdings={rows} adding={adding} setAdding={setAdding} />
-              {e && count > 1 && <div className="split pf-gap2" title="Geser untuk mengubah lebar, klik dua kali untuk reset" {...split.handle} />}
-              {e && count > 1 && <Section title="Korelasi antar saham" className="pf-corr" collapsible id="pf-corr"><CorrelationTable e={e} /></Section>}
+              <StocksPanel
+                name={name} holdings={rows} e={e} sectorOf={sectorOf} colorOf={colorOf}
+                hover={hover} setHover={setHover} adding={adding} setAdding={setAdding}
+              />
+              <div className="split pfx-gap" title="Geser untuk mengubah lebar, klik dua kali untuk reset" {...split.handle} />
+              <PerformancePanel e={e} pending={ev.isPending} error={ev.error} retry={() => ev.refetch()} />
+              {e && count > 1 && (
+                <Section title="Korelasi antar saham" className="pfx-corr rise d4" collapsible id="pf-corr">
+                  <CorrelationPanel e={e} />
+                </Section>
+              )}
             </div>
           </>
         )}
 
-      <HistorySection name={name} />
+      <HistoryPanel name={name} hasHoldings={hasHoldings} />
     </>
   );
 }
 
-function PortfolioPicker({ value, names, onChange }: { value: string; names: string[]; onChange: (v: string) => void }) {
-  const [text, setText] = useState(value);
-  useEffect(() => setText(value), [value]);
-  const commit = (s: string) => { const v = s.trim(); if (v && v !== value) onChange(v); };
+function PortfolioSwitcher({ value, items, onChange }: { value: string; items: PfSummary[]; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState("");
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const down = (ev: MouseEvent) => {
+      if (box.current && !box.current.contains(ev.target as Node)) setOpen(false);
+    };
+    const key = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", down);
+    document.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("mousedown", down);
+      document.removeEventListener("keydown", key);
+    };
+  }, [open]);
+  const known = items.some((p) => p.name === value);
+  const list: PfSummary[] = known ? items : [{ name: value, tickers: 0, positions: 0, firstBuy: "" }, ...items];
+  const choose = (n: string) => {
+    setOpen(false);
+    setDraft("");
+    if (n !== value) onChange(n);
+  };
+  const create = (ev: FormEvent) => {
+    ev.preventDefault();
+    const n = draft.trim();
+    if (n && n.length <= 60) choose(n);
+  };
   return (
-    <label className="field">
-      <span>Portofolio</span>
-      <input
-        list="pf-list" value={text} autoComplete="off"
-        onChange={(e) => { setText(e.target.value); if (names.includes(e.target.value)) commit(e.target.value); }}
-        onBlur={(e) => commit(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && commit(e.currentTarget.value)}
-      />
-      <datalist id="pf-list">{names.map((n) => <option key={n} value={n} />)}</datalist>
-      <small>Ketik nama baru untuk membuat portofolio.</small>
-    </label>
+    <div className="pfx-switch" ref={box}>
+      <button type="button" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span><small>Portofolio</small><strong>{value}</strong></span>
+        <Icon name="down" size={16} />
+      </button>
+      {open && (
+        <div className="pfx-menu">
+          <ul role="listbox" aria-label="Pilih portofolio">
+            {list.map((p) => (
+              <li key={p.name}>
+                <button type="button" role="option" aria-selected={p.name === value} onClick={() => choose(p.name)}>
+                  <strong>{p.name}</strong><small>{p.tickers ? `${p.tickers} saham` : "kosong"}</small>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <form onSubmit={create}>
+            <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Portofolio baru…" maxLength={60} aria-label="Nama portofolio baru" />
+            <button type="submit" disabled={!draft.trim()}>Buat</button>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HeroSkeleton() {
+  return (
+    <section className="card pfx-hero">
+      <div className="pfx-donut"><div className="donut-wrap"><div className="skel" style={{ width: "100%", height: "100%", borderRadius: "50%" }} /></div></div>
+      <div className="pfx-read">
+        <i className="skel" style={{ display: "block", height: 44, width: "38%" }} />
+        <i className="skel" style={{ display: "block", height: 14, width: "82%" }} />
+        <i className="skel" style={{ display: "block", height: 14, width: "64%" }} />
+      </div>
+    </section>
   );
 }
 
 function EmptyPortfolio({ name }: { name: string }) {
   return (
-    <Section title={`Mulai portofolio “${name}”`} className="pf-empty">
-      <p className="muted">Tambahkan posisi pertama untuk melihat Sharpe ratio, alokasi risiko, dan korelasi antar saham.</p>
-      <AddHolding name={name} />
+    <Section title={`Mulai portofolio “${name}”`} className="pfx-empty rise">
+      <div className="pfx-empty-body">
+        <svg className="empty-ring" viewBox="0 0 120 120" aria-hidden>
+          <circle cx="60" cy="60" r="46" fill="none" strokeWidth="12" strokeDasharray="6 6" />
+          <path d="M60 42v36M42 60h36" strokeWidth="6" strokeLinecap="round" fill="none" />
+        </svg>
+        <div>
+          <p className="muted">Tambahkan posisi pertama untuk melihat Sharpe ratio, alokasi risiko, dan korelasi antar saham.</p>
+          <AddHolding name={name} />
+        </div>
+      </div>
     </Section>
   );
 }
 
-function Summary({ e }: { e: Evaluation }) {
+function Hero({ e, order, colorOf, sectorOf, hover, setHover }: {
+  e: Evaluation; order: string[]; colorOf: (t: string) => string; sectorOf: (t: string) => string | undefined;
+  hover: string | null; setHover: (k: string | null) => void;
+}) {
+  const [view, setView] = useState<"w" | "r">("w");
   const now = e.sharpe.current_weights;
-  const n = e.correlation.tickers.length;
+  const animated = useCountUp(now.sharpe);
+  const n = order.length;
+  const avg = e.correlation.average;
+
+  const raw: Slice[] = order.map((t) => ({
+    key: t,
+    value: Math.max(0, (view === "w" ? e.weights[t] : e.risk_contribution[t]) ?? 0),
+    color: colorOf(t),
+  }));
+  const slices: Slice[] = (() => {
+    if (raw.length <= 8) return raw;
+    const sorted = [...raw].sort((a, b) => b.value - a.value);
+    const rest = sorted.slice(7).reduce((s, x) => s + x.value, 0);
+    return [...sorted.slice(0, 7), { key: "Lainnya", value: rest, color: "var(--s8)" }];
+  })();
+  const total = slices.reduce((s, x) => s + x.value, 0) || 1;
+  const hot = hover ? slices.find((s) => s.key === hover) : undefined;
+  const list = insights(e, sectorOf);
+
   return (
-    <>
-      {e.warnings.length > 0 && (
-        <div className="banner" role="alert">
-          <ul>{e.warnings.map((w) => <li key={w}>{w}</li>)}</ul>
+    <section className="card pfx-hero rise">
+      <div className="pfx-donut">
+        <div className="donut-wrap">
+          <Donut slices={slices} hover={hover} onHover={setHover} label={view === "w" ? "Komposisi bobot per saham" : "Kontribusi risiko per saham"} />
+          <div className="donut-center">
+            {hot ? <><strong>{pct(hot.value / total, 1)}</strong><small>{hot.key}</small></> : <><strong>{n}</strong><small>saham</small></>}
+          </div>
         </div>
-      )}
-      <div className="kpis">
-        <Kpi label="Sharpe (bobot sekarang)" value={num(now.sharpe, 2)} tone={tone(now.sharpe)} hint={`Return ${VERDICTS[now.verdict]}`} />
-        <Kpi label="Rata-rata korelasi" value={num(e.correlation.average, 2)} hint={n > 1 ? "Rata-rata berpasangan antar saham" : "Perlu minimal 2 saham"} />
-        <Kpi label="Jumlah saham" value={n} />
-        <Kpi label="Data per" value={day(e.as_of)} hint={e.window ? `Jendela ${e.window.weeks} minggu` : "Estimasi dari statistik universe"} />
+        <Segmented
+          label="Tampilan donat" value={view} onChange={setView}
+          options={[{ value: "w", label: "Bobot" }, { value: "r", label: "Risiko" }]}
+        />
       </div>
-    </>
+
+      <div className="pfx-read">
+        <div className="pfx-sharpe">
+          <span className="lbl">Sharpe ratio</span>
+          <strong className={`pfx-sharpe-val ${tone(now.sharpe)}`}>{animated == null ? "-" : num(animated, 2)}</strong>
+          <Chip kind={now.verdict}>{VERDICT_SHORT[now.verdict]}</Chip>
+          <p>{VERDICT_TEXT[now.verdict]} Patokan umum: di bawah 0 kalah dari suku bunga bebas risiko, 0 sampai 1 wajar, di atas 1 baik.</p>
+        </div>
+        {list.length > 0 && (
+          <ul className="pfx-insights" aria-label="Sorotan">
+            {list.map((x, i) => <li key={x.text} className={x.tone} style={{ animationDelay: `${200 + i * 90}ms` }}>{x.text}</li>)}
+          </ul>
+        )}
+        {e.warnings.length > 0 && (
+          <details className="pfx-notes">
+            <summary>Catatan data ({e.warnings.length})</summary>
+            <ul>{e.warnings.map((w) => <li key={w}>{w}</li>)}</ul>
+          </details>
+        )}
+      </div>
+
+      <dl className="pfx-facts">
+        <div><dt>Jumlah saham</dt><dd>{n}</dd></div>
+        <div>
+          <dt>Korelasi rata-rata</dt>
+          <dd>{n > 1 && avg != null ? num(avg, 2) : "-"}<small>{n > 1 && avg != null ? corrWord(avg) : "perlu minimal 2 saham"}</small></dd>
+        </div>
+        <div>
+          <dt>Jendela data</dt>
+          <dd>
+            {e.window ? `${e.window.weeks} minggu` : "Estimasi cepat"}
+            <small>{e.window ? `${day(e.window.start)} sampai ${day(e.window.end)}` : "dari statistik universe"}</small>
+          </dd>
+        </div>
+        <div><dt>Data per</dt><dd>{day(e.as_of)}</dd></div>
+      </dl>
+    </section>
+  );
+}
+
+type Group = { ticker: string; lots: number; items: Holding[] };
+
+function StocksPanel({ name, holdings, e, sectorOf, colorOf, hover, setHover, adding, setAdding }: {
+  name: string; holdings: Holding[]; e?: Evaluation; sectorOf: (t: string) => string | undefined; colorOf: (t: string) => string;
+  hover: string | null; setHover: (k: string | null) => void; adding: boolean; setAdding: (v: boolean) => void;
+}) {
+  const grown = useMounted();
+  const { remove } = usePortfolioMutations(name);
+  const [open, setOpen] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<number | null>(null);
+
+  const groups = useMemo(() => {
+    const m = new Map<string, Group>();
+    for (const h of holdings) {
+      const g = m.get(h.ticker) ?? { ticker: h.ticker, lots: 0, items: [] };
+      g.lots += h.lots;
+      g.items.push(h);
+      m.set(h.ticker, g);
+    }
+    return [...m.values()].sort((a, b) => (e?.weights[b.ticker] ?? 0) - (e?.weights[a.ticker] ?? 0) || a.ticker.localeCompare(b.ticker));
+  }, [holdings, e]);
+  const totalLots = holdings.reduce((s, h) => s + h.lots, 0);
+
+  return (
+    <Section title={`Saham (${groups.length})`} className="pfx-stocks rise d2">
+      {adding && <AddHolding name={name} onDone={() => setAdding(false)} />}
+      <div className="stk-head" role="presentation">
+        <span>Saham</span>
+        <span><i className="sw bw" />Bobot <i className="sw br" />Risiko</span>
+        <span>Lot</span>
+        <span />
+      </div>
+      <ul className="stk-list">
+        {groups.map((g, i) => {
+          const w = e?.weights[g.ticker];
+          const r = e?.risk_contribution[g.ticker];
+          const isOpen = open === g.ticker;
+          return (
+            <li
+              key={g.ticker} className={`stk${isOpen ? " open" : ""}${hover === g.ticker ? " hot" : ""}`}
+              style={{ animationDelay: `${i * 45}ms` }}
+              onMouseEnter={() => setHover(g.ticker)} onMouseLeave={() => setHover(null)}
+            >
+              <button type="button" className="stk-main" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : g.ticker)}>
+                <span className="stk-name">
+                  <i className="stk-dot" style={{ background: colorOf(g.ticker) }} />
+                  <span><strong>{g.ticker}</strong><small>{sectorOf(g.ticker) ?? "-"}</small></span>
+                </span>
+                <span className="stk-bars">
+                  {e ? (
+                    <>
+                      <span className="stk-m"><span className="stk-t"><i className="stk-f bw" style={{ width: grown ? clamp(w) : "0%" }} /></span><b>{pct(w, 1)}</b></span>
+                      <span className="stk-m r"><span className="stk-t"><i className="stk-f br" style={{ width: grown ? clamp(r) : "0%" }} /></span><b>{pct(r, 1)}</b></span>
+                    </>
+                  ) : (
+                    <>
+                      <i className="skel" style={{ display: "block", height: 8 }} />
+                      <i className="skel" style={{ display: "block", height: 8, width: "70%" }} />
+                    </>
+                  )}
+                </span>
+                <span className="stk-lots"><b>{num(g.lots, 2)}</b><small>{g.items.length > 1 ? `${g.items.length} pembelian` : "lot"}</small></span>
+                <span className="stk-chev"><Icon name="down" size={16} /></span>
+              </button>
+              {isOpen && (
+                <ul className="stk-buys">
+                  {g.items.map((h) => (
+                    <li key={h.id}>
+                      <span>{day(h.buy_date)}</span>
+                      <span>{num(h.lots, 2)} lot</span>
+                      <span className="act">
+                        {confirm === h.id ? (
+                          <>
+                            <button type="button" className="btn-danger" disabled={remove.isPending} onClick={() => remove.mutate(h.id, { onSettled: () => setConfirm(null) })}>Ya, hapus</button>
+                            <button type="button" className="btn-ghost" onClick={() => setConfirm(null)}>Batal</button>
+                          </>
+                        ) : (
+                          <button type="button" className="btn-ghost" onClick={() => setConfirm(h.id)}>Hapus</button>
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      <div className="stk-total"><span>Total</span><span>{num(totalLots, 2)} lot di {groups.length} saham</span></div>
+      {remove.isError && <p className="down" role="alert">{remove.error.message}</p>}
+    </Section>
+  );
+}
+
+function AddHolding({ name, onDone }: { name: string; onDone?: () => void }) {
+  const { add } = usePortfolioMutations(name);
+  const [ticker, setTicker] = useState<string | null>(null);
+  const [lots, setLots] = useState("");
+  const [date, setDate] = useState("");
+  const today = new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+  const submit = (ev: FormEvent) => {
+    ev.preventDefault();
+    if (!ticker) return;
+    add.mutate(
+      { ticker, lots: Number(lots), buy_date: date },
+      { onSuccess: () => { setTicker(null); setLots(""); onDone?.(); } },
+    );
+  };
+  return (
+    <form className="pfx-form" onSubmit={submit}>
+      <div className="field">
+        <span>Emiten</span>
+        {ticker ? (
+          <span className="pfx-pick"><strong>{ticker}</strong><button type="button" className="pfx-link" onClick={() => setTicker(null)}>Ganti</button></span>
+        ) : (
+          <TickerSearch compact remember={false} label="Cari emiten" placeholder="Kode atau sektor" onPick={setTicker} />
+        )}
+      </div>
+      <label className="field">
+        <span>Jumlah lot</span>
+        <input required type="number" inputMode="decimal" min={0.01} step={0.01} value={lots} onChange={(e) => setLots(e.target.value)} />
+        <small>1 lot = 100 lembar</small>
+      </label>
+      <label className="field">
+        <span>Tanggal beli</span>
+        <input required type="date" max={today} value={date} onChange={(e) => setDate(e.target.value)} />
+      </label>
+      <button className="primary" type="submit" disabled={add.isPending || !ticker}>{add.isPending ? "Menyimpan…" : "Simpan posisi"}</button>
+      {add.isError && <p className="down" role="alert">{add.error.message}</p>}
+    </form>
   );
 }
 
 type SRow = { label: string; b: SharpeBlock };
 
-function SharpeSection({ e }: { e: Evaluation }) {
-  const rows: SRow[] = SHARPE_ROWS.flatMap(([k, label]) => (e.sharpe[k] ? [{ label, b: e.sharpe[k] as SharpeBlock }] : []));
-  const ok = (r: SRow) => r.b.sharpe != null && r.b.ci_low != null && r.b.ci_high != null;
+function PerformancePanel({ e, pending, error, retry }: { e?: Evaluation; pending: boolean; error: unknown; retry: () => void }) {
+  const on = useMounted();
+  if (!e) {
+    return (
+      <Section title="Kinerja disesuaikan risiko" className="pfx-perf rise d3">
+        {pending ? (
+          <div className="skels">
+            <i className="skel" style={{ display: "block", height: 18, width: "40%" }} />
+            <i className="skel" style={{ display: "block", height: 24 }} />
+            <i className="skel" style={{ display: "block", height: 18, width: "55%" }} />
+          </div>
+        ) : error ? <ErrorState error={error} retry={retry} /> : null}
+      </Section>
+    );
+  }
+  const rows = SHARPE_ROWS.flatMap(([k, label, note]) => (e.sharpe[k] ? [{ label, note, b: e.sharpe[k] as SharpeBlock }] : []));
+  const ok = (r: { b: SharpeBlock }) => r.b.sharpe != null && r.b.ci_low != null && r.b.ci_high != null;
   const plotted = rows.filter(ok);
   const lo = Math.min(0, ...plotted.map((r) => r.b.ci_low as number));
   const hi = Math.max(0, ...plotted.map((r) => r.b.ci_high as number));
@@ -156,11 +503,12 @@ function SharpeSection({ e }: { e: Evaluation }) {
   ];
 
   return (
-    <Section title="Sharpe ratio" className="pf-sharpe" collapsible id="pf-sharpe">
+    <Section title="Kinerja disesuaikan risiko" className="pfx-perf rise d3" collapsible id="pf-sharpe">
       <ul className="rngs">
         {rows.map((r) => (
           <li key={r.label}>
             <div className="rng-head"><span>{r.label}</span><strong className={tone(r.b.sharpe)}>{num(r.b.sharpe, 2)}</strong></div>
+            <small className="rng-sub">{r.note}</small>
             {ok(r) ? (
               <>
                 <div
@@ -168,8 +516,14 @@ function SharpeSection({ e }: { e: Evaluation }) {
                   aria-label={`${r.label}: Sharpe ${num(r.b.sharpe, 2)}, selang 95% ${num(r.b.ci_low, 2)} sampai ${num(r.b.ci_high, 2)}`}
                 >
                   <i className="rng-zero" style={{ left: at(0) }} />
-                  <i className="rng-ci" style={{ left: at(r.b.ci_low as number), width: `${(((r.b.ci_high as number) - (r.b.ci_low as number)) / (b - a)) * 100}%` }} />
-                  <i className="rng-dot" style={{ left: at(r.b.sharpe as number) }} />
+                  <i
+                    className="rng-ci"
+                    style={{
+                      left: on ? at(r.b.ci_low as number) : at(0),
+                      width: on ? `${(((r.b.ci_high as number) - (r.b.ci_low as number)) / (b - a)) * 100}%` : "0%",
+                    }}
+                  />
+                  <i className="rng-dot" style={{ left: on ? at(r.b.sharpe as number) : at(0) }} />
                 </div>
                 <div className="rng-foot">
                   <span>{num(r.b.ci_low, 2)}</span>
@@ -183,52 +537,33 @@ function SharpeSection({ e }: { e: Evaluation }) {
           </li>
         ))}
       </ul>
-      <p className="muted small">
-        Batang menunjukkan selang kepercayaan 95%, garis putus-putus adalah nol. Jika batang melewati nol, hasilnya belum dapat dibedakan dari suku bunga bebas risiko.
-      </p>
+      <p className="muted small">Batang adalah selang kepercayaan 95% dan garis putus-putus adalah nol. Jika batang melewati nol, hasilnya belum dapat dibedakan dari suku bunga bebas risiko.</p>
       <details className="more">
         <summary>Rincian perhitungan</summary>
         <DataTable cols={cols} rows={rows} />
-        <p className="muted small">
-          “Bobot sekarang” mengandaikan bobot hari ini konstan selama jendela data, sedangkan “Sejak beli” memakai return yang benar-benar terjadi.
-        </p>
       </details>
     </Section>
   );
 }
 
-function AllocationSection({ e }: { e: Evaluation }) {
-  const items = Object.keys(e.weights)
-    .map((t) => ({ t, w: e.weights[t] ?? 0, r: e.risk_contribution[t] ?? 0 }))
-    .sort((x, y) => y.w - x.w);
-  return (
-    <Section title="Alokasi dan risiko" className="pf-alloc" collapsible id="pf-alloc">
-      <ul className="alloc">
-        {items.map(({ t, w, r }) => (
-          <li key={t}>
-            <strong>{t}</strong>
-            <div className="bars" role="img" aria-label={`${t}: bobot ${pct(w, 1)}, kontribusi risiko ${pct(r, 1)}`}>
-              <i className="bar bw" style={{ width: `${Math.max(0, Math.min(100, w * 100))}%` }} />
-              <i className="bar br" style={{ width: `${Math.max(0, Math.min(100, r * 100))}%` }} />
-            </div>
-            <span className="nums">{pct(w, 1)} <small>· risiko {pct(r, 1)}</small></span>
-          </li>
-        ))}
-      </ul>
-      <div className="legend">
-        <span><i className="sw bw" />Bobot</span>
-        <span><i className="sw br" />Kontribusi risiko</span>
-      </div>
-    </Section>
-  );
-}
-
-function CorrelationTable({ e }: { e: Evaluation }) {
+function CorrelationPanel({ e }: { e: Evaluation }) {
   const { tickers, matrix, average } = e.correlation;
   const shade = (v: number | null) =>
     v == null ? undefined : `color-mix(in srgb, var(${v >= 0 ? "--accent" : "--down"}) ${Math.min(1, Math.abs(v)) * 65}%, transparent)`;
+  let best: { a: string; b: string; r: number } | null = null;
+  for (let i = 0; i < tickers.length; i++) {
+    for (let j = i + 1; j < tickers.length; j++) {
+      const r = matrix[i][j];
+      if (r != null && (best === null || Math.abs(r) > Math.abs(best.r))) best = { a: tickers[i], b: tickers[j], r };
+    }
+  }
   return (
     <>
+      {best && (
+        <p className="pfx-pair">
+          Pasangan paling erat: <strong>{best.a} dan {best.b}</strong> ({num(best.r, 2)}, {relation(best.r)}).
+        </p>
+      )}
       <div className="tablewrap">
         <table>
           <thead><tr><th />{tickers.map((t) => <th key={t} className="r">{t}</th>)}</tr></thead>
@@ -249,75 +584,38 @@ function CorrelationTable({ e }: { e: Evaluation }) {
   );
 }
 
-function PositionsSection({ name, holdings, adding, setAdding }: {
-  name: string; holdings: Holding[]; adding: boolean; setAdding: (v: boolean) => void;
-}) {
-  const { remove } = usePortfolioMutations(name);
-  const cols: Col<Holding>[] = [
-    { key: "ticker", label: "Ticker" },
-    { key: "lots", label: "Lot", num: true, fmt: (v) => num(v, 2) },
-    { key: "buy_date", label: "Tanggal beli", fmt: (v) => day(v) },
-    {
-      key: "id", label: "Aksi",
-      fmt: (_, r) => (
-        <button
-          disabled={remove.isPending}
-          onClick={() => window.confirm(`Hapus posisi ${r.ticker} (${r.lots} lot, ${r.buy_date})?`) && remove.mutate(r.id)}
-        >
-          Hapus
-        </button>
-      ),
-    },
-  ];
-  return (
-    <Section
-      title="Posisi" className="pf-hold" collapsible id="pf-hold"
-      action={<button className={adding ? "" : "primary"} onClick={() => setAdding(!adding)}>{adding ? "Tutup" : "+ Tambah posisi"}</button>}
-    >
-      {adding && <AddHolding name={name} onDone={() => setAdding(false)} />}
-      <DataTable cols={cols} rows={holdings} />
-      {remove.isError && <p className="down" role="alert">{remove.error.message}</p>}
-    </Section>
-  );
-}
-
-function AddHolding({ name, onDone }: { name: string; onDone?: () => void }) {
-  const { add } = usePortfolioMutations(name);
-  const [ticker, setTicker] = useState("");
-  const [lots, setLots] = useState("");
-  const [date, setDate] = useState("");
-  const today = new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
-  const submit = (ev: FormEvent) => {
-    ev.preventDefault();
-    add.mutate(
-      { ticker: ticker.trim(), lots: Number(lots), buy_date: date },
-      { onSuccess: () => { setTicker(""); setLots(""); onDone?.(); } },
-    );
-  };
-  return (
-    <form className="formgrid" onSubmit={submit}>
-      <label className="field"><span>Ticker</span>
-        <input required value={ticker} onChange={(e) => setTicker(e.target.value)} placeholder="mis. BBCA" autoComplete="off" />
-      </label>
-      <label className="field"><span>Lot</span>
-        <input required type="number" inputMode="decimal" min={0.01} step={0.01} value={lots} onChange={(e) => setLots(e.target.value)} />
-      </label>
-      <label className="field"><span>Tanggal beli</span>
-        <input required type="date" max={today} value={date} onChange={(e) => setDate(e.target.value)} />
-      </label>
-      <button className="primary" type="submit" disabled={add.isPending}>{add.isPending ? "Menyimpan…" : "Simpan posisi"}</button>
-      {add.isError && <p className="down" role="alert">{add.error.message}</p>}
-    </form>
-  );
-}
-
-function HistorySection({ name }: { name: string }) {
+function HistoryPanel({ name, hasHoldings }: { name: string; hasHoldings: boolean }) {
   const q = useHistory(name);
+  const { snapshot } = usePortfolioMutations(name);
+  const empty = q.data ? q.data.x.length === 0 : false;
+  const save = (
+    <button type="button" className={empty ? "primary" : ""} disabled={!hasHoldings || snapshot.isPending} onClick={() => snapshot.mutate()}>
+      {snapshot.isPending ? "Menyimpan…" : "Simpan evaluasi hari ini"}
+    </button>
+  );
   return (
-    <Section title="Riwayat evaluasi tersimpan" className="pf-history" collapsible id="pf-history">
-      <Async q={q} isEmpty={(d) => d.x.length === 0 && "Belum ada riwayat. Riwayat terisi saat python daily.py --only portfolio atau python portfolio_cli.py evaluate-all dijalankan."}>
-        {(h) => <HistoryView h={h} />}
-      </Async>
+    <Section title="Riwayat evaluasi" className="pfx-hist rise d5" collapsible id="pf-history" action={q.data && !empty ? save : undefined}>
+      {snapshot.isError && <p className="down" role="alert">{snapshot.error.message}</p>}
+      {q.isPending ? <i className="skel" style={{ display: "block", height: 120 }} />
+        : q.isError ? <ErrorState error={q.error} retry={() => q.refetch()} />
+        : empty ? (
+          <div className="hist-empty">
+            <svg className="hist-art" viewBox="0 0 96 64" aria-hidden fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <polyline points="4,48 24,36 44,42 64,22 92,12" strokeDasharray="4 5" />
+              <circle cx="4" cy="48" r="3" fill="currentColor" /><circle cx="24" cy="36" r="3" fill="currentColor" />
+              <circle cx="44" cy="42" r="3" fill="currentColor" /><circle cx="64" cy="22" r="3" fill="currentColor" />
+            </svg>
+            <div>
+              <strong>Belum ada riwayat</strong>
+              <p>
+                Riwayat merekam Sharpe ratio dan korelasi portofolio dari hari ke hari, sehingga Anda bisa melihat apakah risikonya membaik atau memburuk.
+                Terisi otomatis setiap evaluasi harian berjalan, atau simpan hasil hari ini sekarang.
+              </p>
+              {hasHoldings ? save : <p>Tambahkan posisi terlebih dulu.</p>}
+            </div>
+          </div>
+        )
+        : <HistoryView h={q.data} />}
     </Section>
   );
 }
@@ -328,11 +626,11 @@ function HistoryView({ h }: { h: PfHistory }) {
   const c = useColors();
   const option = useMemo(() => baseOption(c, {
     grid: { left: 56, right: 16, top: 36, bottom: 28 },
-    xAxis: X(c), yAxis: Y(c, yName("Sharpe ratio", 40)), dataZoom: [{ type: "inside" }],
+    xAxis: X(c), yAxis: Y(c, yName("Sharpe ratio", 40)), dataZoom: [{ type: "inside", zoomOnMouseWheel: "ctrl" }],
     series: [
-      line("Sejak beli", h.x, h.sharpe_since_buy, c.accent),
-      line("Bobot sekarang", h.x, h.sharpe_current_weights, c.up),
-      line("Sama rata", h.x, h.sharpe_equal_weight, c.muted),
+      line("Sejak dibeli", h.x, h.sharpe_since_buy, c.accent, { showSymbol: true, symbolSize: 6 }),
+      line("Bobot sekarang", h.x, h.sharpe_current_weights, c.up, { showSymbol: true, symbolSize: 6 }),
+      line("Dibagi sama rata", h.x, h.sharpe_equal_weight, c.muted, { showSymbol: true, symbolSize: 6 }),
     ],
   }), [c, h]);
   const rows: HRow[] = useMemo(
@@ -341,7 +639,7 @@ function HistoryView({ h }: { h: PfHistory }) {
   );
   const cols: Col<HRow>[] = [
     { key: "as_of", label: "Per tanggal", fmt: (v) => day(v) },
-    { key: "since", label: "Sharpe sejak beli", num: true, fmt: (v) => num(v, 2) },
+    { key: "since", label: "Sharpe sejak dibeli", num: true, fmt: (v) => num(v, 2) },
     { key: "now", label: "Sharpe bobot sekarang", num: true, fmt: (v) => num(v, 2) },
     { key: "equal", label: "Sharpe sama rata", num: true, fmt: (v) => num(v, 2) },
     { key: "corr", label: "Rata-rata korelasi", num: true, fmt: (v) => num(v, 2) },
@@ -349,7 +647,9 @@ function HistoryView({ h }: { h: PfHistory }) {
   ];
   return (
     <>
-      <Chart option={option} height={300} label="Riwayat Sharpe ratio portofolio" />
+      {h.x.length >= 2
+        ? <Chart option={option} height={300} label="Riwayat Sharpe ratio portofolio" />
+        : <p className="muted">Baru ada satu titik riwayat. Grafik muncul setelah ada minimal dua tanggal.</p>}
       <DataTable cols={cols} rows={rows} pageSize={15} csv="riwayat_portofolio.csv" />
     </>
   );
