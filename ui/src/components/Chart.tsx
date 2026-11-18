@@ -55,7 +55,7 @@ export function stack(c: Palette, H: number, weights: number[], names: string[])
     grid,
     xAxis: weights.map((_, i) => ({ ...X(c), gridIndex: i, axisLabel: { show: i === weights.length - 1, color: c.muted } })),
     yAxis: weights.map((_, i): Record<string, unknown> => ({ ...Y(c), ...yName(names[i]), gridIndex: i, nameTextStyle: { color: c.muted } })),
-    dataZoom: [{ type: "inside", xAxisIndex: weights.map((_, i) => i) }],
+        dataZoom: [{ type: "inside", xAxisIndex: weights.map((_, i) => i), zoomOnMouseWheel: "ctrl" }],
     axisPointer: { link: [{ xAxisIndex: "all" }] },
   };
 }

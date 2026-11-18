@@ -1,11 +1,11 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useUser } from "@clerk/react";
-import { useMacroOverview, useMacroSeries, useMeta, useScanPeriods, useScanResults, useTickers } from "../lib/api";
+import { useMacroOverview, useMacroSeries, useMeta, useScanPeriods, useScanResults } from "../lib/api";
 import { day, num, pct, tone } from "../lib/format";
 import { useEvaluation, usePortfolios, type Evaluation, type SharpeBlock } from "../lib/portfolio";
 import type { MacroRow, ScanRow } from "../lib/types";
 import { Chip, Section } from "../components/ui";
+import { TickerSearch } from "../components/TickerSearch";
 
 const VERDICT: Record<SharpeBlock["verdict"], string> = {
   positif: "di atas suku bunga",
@@ -18,6 +18,10 @@ const greeting = () => {
   const h = new Date().getHours();
   return h < 11 ? "Selamat pagi" : h < 15 ? "Selamat siang" : h < 18 ? "Selamat sore" : "Selamat malam";
 };
+
+/** Lebar bar dalam persen, dibatasi 0-100. Kontribusi risiko bisa negatif untuk aset lindung nilai. */
+const width = (v: number | null | undefined) => `${Math.max(0, Math.min(100, (v ?? 0) * 100))}%`;
+const reason = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
 
 function Spark({ values, color }: { values: number[]; color: string }) {
   if (values.length < 2) return null;
@@ -47,27 +51,6 @@ function Stat({ label, value, delta, hint, spark, href, loading }: {
   );
 }
 
-function TickerSearch() {
-  const nav = useNavigate();
-  const q = useTickers();
-  const [text, setText] = useState("");
-  const go = (s: string) => {
-    const t = s.trim().toUpperCase();
-    if (q.data?.some((x) => x.ticker === t)) nav(`/emiten/${t}`);
-  };
-  return (
-    <label className="field home-search">
-      <span>Cari emiten</span>
-      <input
-        list="home-tickers" value={text} placeholder="mis. BBCA" autoComplete="off" spellCheck={false}
-        onChange={(e) => { setText(e.target.value); go(e.target.value); }}
-        onKeyDown={(e) => e.key === "Enter" && go(text)}
-      />
-      <datalist id="home-tickers">{(q.data ?? []).map((t) => <option key={t.ticker} value={t.ticker}>{t.sector}</option>)}</datalist>
-    </label>
-  );
-}
-
 function SignalList({ rows }: { rows: ScanRow[] }) {
   if (!rows.length) return <p className="muted">Belum ada sinyal kuat atau moderat pada periode ini.</p>;
   return (
@@ -88,7 +71,11 @@ function SignalList({ rows }: { rows: ScanRow[] }) {
   );
 }
 
-function PortfolioGlance({ name, loading, e }: { name?: string; loading: boolean; e?: Evaluation }) {
+function PortfolioGlance({ name, href, loading, listError, evalError, e }: {
+  name?: string; href: string; loading: boolean; listError: unknown; evalError?: string; e?: Evaluation;
+}) {
+  if (loading) return <p className="muted">Memuat…</p>;
+  if (listError) return <p className="muted">{reason(listError, "Portofolio belum dapat dimuat.")}</p>;
   if (!name) {
     return (
       <div className="empty-cta">
@@ -97,12 +84,11 @@ function PortfolioGlance({ name, loading, e }: { name?: string; loading: boolean
       </div>
     );
   }
-  if (loading) return <p className="muted">Memuat…</p>;
   if (!e) {
     return (
       <div className="empty-cta">
-        <p className="muted">Ringkasan cepat belum tersedia untuk “{name}”.</p>
-        <Link to="/portofolio" className="btn">Buka portofolio</Link>
+        <p className="muted">{evalError ?? `Ringkasan cepat belum tersedia untuk “${name}”.`}</p>
+        <Link to={href} className="btn">Buka portofolio</Link>
       </div>
     );
   }
@@ -118,8 +104,8 @@ function PortfolioGlance({ name, loading, e }: { name?: string; loading: boolean
           <li key={t}>
             <strong>{t}</strong>
             <div className="bars">
-              <i className="bar bw" style={{ width: `${Math.min(100, w * 100)}%` }} />
-              <i className="bar br" style={{ width: `${Math.min(100, r * 100)}%` }} />
+              <i className="bar bw" style={{ width: width(w) }} />
+              <i className="bar br" style={{ width: width(r) }} />
             </div>
             <span className="nums">{pct(w, 1)} <small>· risiko {pct(r, 1)}</small></span>
           </li>
@@ -129,7 +115,8 @@ function PortfolioGlance({ name, loading, e }: { name?: string; loading: boolean
   );
 }
 
-function MacroMovers({ rows }: { rows?: MacroRow[] }) {
+function MacroMovers({ rows, error }: { rows?: MacroRow[]; error: boolean }) {
+  if (error) return <p className="muted">Data makro belum bisa dimuat.</p>;
   const top = [...(rows ?? [])]
     .filter((r) => r.change1m != null)
     .sort((a, b) => Math.abs(b.change1m ?? 0) - Math.abs(a.change1m ?? 0))
@@ -158,7 +145,9 @@ export default function HomePage() {
   const latest = periods.data?.[0];
   const scan = useScanResults(latest?.year, latest?.period);
   const pfs = usePortfolios();
-  const pfName = pfs.data?.[0]?.name;
+  // Selaras dengan halaman Portofolio: utamakan "default", bila tidak ada pakai yang pertama.
+  const pfName = pfs.data?.find((p) => p.name === "default")?.name ?? pfs.data?.[0]?.name;
+  const pfHref = pfName ? `/portofolio?p=${encodeURIComponent(pfName)}` : "/portofolio";
   const quick = useEvaluation(pfName ?? "", "quick", Boolean(pfName));
 
   const pick = (k: string) => macro.data?.find((r) => r.key === k);
@@ -172,6 +161,14 @@ export default function HomePage() {
     .slice(0, 6);
   const sharpe = quick.data?.sharpe.current_weights;
 
+  const scanLoading = periods.isPending || (Boolean(latest) && scan.isPending);
+  const pfLoading = pfs.isPending || (Boolean(pfName) && quick.isPending);
+  const pfHint = pfs.isError
+    ? "tidak tersedia"
+    : pfName
+      ? (sharpe ? `“${pfName}” · ${VERDICT[sharpe.verdict]}` : `“${pfName}”`)
+      : "belum ada portofolio";
+
   return (
     <>
       <section className="hero">
@@ -182,7 +179,7 @@ export default function HomePage() {
             Ringkasan pasar, sinyal, dan portofolio Anda.{meta.data?.lastPriceDate ? ` Harga terakhir ${day(meta.data.lastPriceDate)}.` : ""}
           </p>
         </div>
-        <TickerSearch />
+        <TickerSearch globalKey />
       </section>
 
       <div className="stats">
@@ -190,26 +187,28 @@ export default function HomePage() {
         <Stat label="USD/IDR" value={num(fx?.last_value, 0)} delta={fx?.change1m} hint="1 bulan" spark={series.data?.series["USDIDR"]?.y} loading={macro.isPending} href="/makro?k=USDIDR" />
         <Stat
           label="Sinyal aktif" value={String(active)} hint={latest ? `${latest.period} ${latest.year}` : "belum ada pemindaian"}
-          loading={periods.isPending || (Boolean(latest) && scan.isPending)} href="/sinyal?tab=scan"
+          loading={scanLoading} href="/sinyal?tab=scan"
         />
         <Stat
-          label="Sharpe portofolio" value={sharpe ? num(sharpe.sharpe, 2) : "-"}
-          hint={pfName ? (sharpe ? `“${pfName}” · ${VERDICT[sharpe.verdict]}` : `“${pfName}”`) : "belum ada portofolio"}
-          loading={pfs.isPending || (Boolean(pfName) && quick.isPending)} href="/portofolio"
+          label="Sharpe portofolio" value={sharpe ? num(sharpe.sharpe, 2) : "-"} hint={pfHint}
+          loading={pfLoading} href={pfHref}
         />
       </div>
 
       <div className="home-grid">
         <Section title="Sinyal terbaru" className="home-signals" action={<Link className="more-link" to="/sinyal?tab=scan">Lihat semua</Link>}>
-          {periods.isPending || (Boolean(latest) && scan.isPending) ? <p className="muted">Memuat…</p>
+          {scanLoading ? <p className="muted">Memuat…</p>
             : periods.isError || scan.isError ? <p className="muted">Hasil pemindaian belum tersedia.</p>
             : <SignalList rows={top} />}
         </Section>
-        <Section title="Portofolio" className="home-portfolio" action={<Link className="more-link" to="/portofolio">Buka</Link>}>
-          <PortfolioGlance name={pfName} loading={pfs.isPending || (Boolean(pfName) && quick.isPending)} e={quick.data} />
+        <Section title="Portofolio" className="home-portfolio" action={<Link className="more-link" to={pfHref}>Buka</Link>}>
+          <PortfolioGlance
+            name={pfName} href={pfHref} loading={pfLoading} listError={pfs.error}
+            evalError={quick.isError ? reason(quick.error, "") || undefined : undefined} e={quick.data}
+          />
         </Section>
         <Section title="Makro, gerak 1 bulan terbesar" className="home-macro" action={<Link className="more-link" to="/makro">Semua</Link>}>
-          <MacroMovers rows={macro.data} />
+          <MacroMovers rows={macro.data} error={macro.isError} />
         </Section>
       </div>
     </>

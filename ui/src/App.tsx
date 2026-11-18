@@ -1,11 +1,11 @@
 import { lazy, Suspense, useRef, useState, type CSSProperties, type KeyboardEvent as KeyEvt, type PointerEvent as PtrEvt } from "react";
-import { NavLink, Route, Routes, useLocation } from "react-router-dom";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { UserButton, useUser } from "@clerk/react";
-import { api, useMeta } from "./lib/api";
+import { useMeta } from "./lib/api";
 import { day, stampLabel } from "./lib/format";
 import { store } from "./lib/hooks";
 import { Icon, type IconName } from "./components/Icon";
+import { TickerSearch } from "./components/TickerSearch";
 import { Empty, ErrorBoundary, ErrorState, Loading } from "./components/ui";
 
 const HomePage = lazy(() => import("./pages/HomePage"));
@@ -70,16 +70,21 @@ function useSidebar() {
 
 export default function App() {
   const meta = useMeta();
-  const qc = useQueryClient();
-  const { pathname } = useLocation();
+  const nav = useNavigate();
+  const { pathname, search } = useLocation();
   const { user } = useUser();
   const side = useSidebar();
-  const refresh = useMutation({
-    mutationFn: () => api("/refresh", undefined, { method: "POST" }),
-    onSuccess: () => qc.invalidateQueries(),
-  });
   const m = meta.data;
   const stale = m?.ageDays != null && m.ageDays > 4;
+  const warn = m?.source === "snapshot" || stale;
+  const pill = m
+    ? `${m.source === "snapshot" ? `Snapshot R2 ${m.snapshot ? stampLabel(m.snapshot) : ""}` : `Data per ${day(m.lastPriceDate)}`}${stale ? " · tertinggal" : ""}`
+    : meta.isPending ? "Memeriksa…" : "";
+
+  const pickTicker = (t: string) => {
+    const tab = pathname.startsWith("/emiten") ? new URLSearchParams(search).get("tab") : null;
+    nav(`/emiten/${t}${tab ? `?tab=${tab}` : ""}`);
+  };
 
   return (
     <div
@@ -96,20 +101,6 @@ export default function App() {
             </NavLink>
           ))}
         </nav>
-        <NavLink to="/status" className="source" title="Status data">
-          {m ? (
-            <>
-              <span className="src-main">
-                <span className={`dot ${m.source === "database" ? "ok" : "warn"}`} aria-hidden />
-                <span className="label">{m.source === "database" ? "Database" : `Snapshot R2 ${m.snapshot ? stampLabel(m.snapshot) : ""}`}</span>
-              </span>
-              <small className={`label${stale ? " down" : ""}`}>Harga terakhir: {day(m.lastPriceDate)}{stale ? " (tertinggal)" : ""}</small>
-            </>
-          ) : meta.isPending ? <span className="label">Memeriksa sumber data…</span> : null}
-        </NavLink>
-        <button type="button" className="refresh" onClick={() => refresh.mutate()} disabled={refresh.isPending} title="Muat ulang data">
-          <Icon name="refresh" /><span className="label">{refresh.isPending ? "Memuat…" : "Muat ulang data"}</span>
-        </button>
         <div className="account">
           <UserButton />
           <span className="label acc-name">{user?.firstName ?? user?.username ?? ""}</span>
@@ -124,6 +115,13 @@ export default function App() {
         />
       </aside>
       <main id="main">
+        <div className="topbar">
+          {pathname !== "/" && <TickerSearch compact globalKey placeholder="Cari emiten…" onPick={pickTicker} />}
+          <NavLink to="/status" className={`pill${warn ? " warn" : ""}`} title="Lihat status data">
+            <span className={`dot ${warn ? "warn" : "ok"}`} aria-hidden />
+            <span className="pill-text">{pill}</span>
+          </NavLink>
+        </div>
         {meta.isError ? (
           <ErrorState error={meta.error} retry={() => meta.refetch()} />
         ) : (

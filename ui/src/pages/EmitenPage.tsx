@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Navigate, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Navigate, useParams } from "react-router-dom";
 import { useFinancials, usePrices, useScanHistory, useTickerSignals, useTickers } from "../lib/api";
 import { day, lowerBound, num, pct, compact, tone } from "../lib/format";
 import { store, useColors, useParam, type Palette } from "../lib/hooks";
 import type { Annual, AnnualKey, Financials, HistRow, Prices, SignalMark, Ticker } from "../lib/types";
 import { baseOption, Chart, line, pts, stack, X, Y, yName } from "../components/Chart";
+import { pushRecent } from "../components/TickerSearch";
 import { Async, Chip, DataTable, Kpi, Section, Segmented, Tabs, type Col } from "../components/ui";
 import RegimeTab from "./RegimeTab";
 
@@ -22,7 +23,11 @@ function EmitenView({ list, ticker }: { list: Ticker[]; ticker?: string }) {
   const [tab, setTab] = useParam("tab", "harga");
   const current = list.find((t) => t.ticker === ticker?.toUpperCase());
   useEffect(() => {
-    if (current) { store.set("ticker", current.ticker); document.title = `${current.ticker} · Nirflo`; }
+    if (current) {
+      store.set("ticker", current.ticker);
+      pushRecent(current.ticker);
+      document.title = `${current.ticker} · Nirflo`;
+    }
   }, [current]);
 
   if (!ticker) {
@@ -32,11 +37,10 @@ function EmitenView({ list, ticker }: { list: Ticker[]; ticker?: string }) {
   return (
     <>
       <header className="pagehead">
-        <TickerPicker list={list} value={current?.ticker ?? ticker} tab={tab} />
-        {current && <div><h2>{current.ticker}</h2><p className="muted">{current.sector}</p></div>}
+        {current ? <div><h2>{current.ticker}</h2><p className="muted">{current.sector}</p></div> : <h2>{ticker.toUpperCase()}</h2>}
       </header>
       {!current ? (
-        <div className="state empty">Emiten “{ticker}” tidak ditemukan atau tidak aktif.</div>
+        <div className="state empty">Emiten “{ticker}” tidak ditemukan atau tidak aktif. Gunakan pencarian di atas untuk memilih emiten lain.</div>
       ) : (
         <>
           <Tabs value={tab} onChange={setTab} tabs={[
@@ -55,38 +59,6 @@ function EmitenView({ list, ticker }: { list: Ticker[]; ticker?: string }) {
   );
 }
 
-/** Pencarian emiten: ketik kode, tekan "/" dari mana saja untuk fokus. */
-function TickerPicker({ list, value, tab }: { list: Ticker[]; value: string; tab: string }) {
-  const nav = useNavigate();
-  const ref = useRef<HTMLInputElement>(null);
-  const [text, setText] = useState(value);
-  useEffect(() => setText(value), [value]);
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => {
-      const t = e.target;
-      if (e.key === "/" && !(t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement)) {
-        e.preventDefault(); ref.current?.focus(); ref.current?.select();
-      }
-    };
-    addEventListener("keydown", h);
-    return () => removeEventListener("keydown", h);
-  }, []);
-  const go = (s: string) => {
-    const hit = list.find((t) => t.ticker === s.trim().toUpperCase());
-    if (hit && hit.ticker !== value) nav(`/emiten/${hit.ticker}${tab !== "harga" ? `?tab=${tab}` : ""}`);
-  };
-  return (
-    <label className="field picker">
-      <span>Emiten <kbd>/</kbd></span>
-      <input ref={ref} list="ticker-list" value={text} autoComplete="off" spellCheck={false}
-        onChange={(e) => { setText(e.target.value); go(e.target.value); }}
-        onKeyDown={(e) => e.key === "Enter" && go(text)} />
-      <datalist id="ticker-list">{list.map((t) => <option key={t.ticker} value={t.ticker}>{t.sector}</option>)}</datalist>
-    </label>
-  );
-}
-
-// ------------------------------------------------------------------ Harga
 const RANGES: Record<string, number> = { "1 bulan": 31, "3 bulan": 92, "6 bulan": 183, "1 tahun": 365, "3 tahun": 1095, Semua: 0 };
 
 function sma(v: number[], n: number): (number | null)[] {
@@ -101,26 +73,54 @@ function priceOption(c: Palette, p: Prices, days: number, ma: boolean, marks: Si
   const cut = days ? new Date(new Date(p.x[n - 1]).getTime() - days * 864e5).toISOString().slice(0, 10) : "";
   const i0 = days ? lowerBound(p.x, cut) : 0;
   const x = p.x.slice(i0), close = p.close.slice(i0);
-  const s = stack(c, 480, [78, 22], ["Harga", "Volume"]);
+  const s = stack(c, 480, [76, 24], ["", ""]);
+  s.yAxis[0] = { ...s.yAxis[0], name: "", axisLabel: { color: c.muted, formatter: (v: number) => num(v, 0) } };
+  s.yAxis[1] = {
+    ...s.yAxis[1], name: "", scale: false, splitNumber: 2, splitLine: { show: false },
+    axisLabel: { color: c.muted, formatter: (v: number) => compact(v) },
+  };
 
-  const series: object[] = [line("Penutupan", x, close, c.accent, { lineStyle: { width: 1.8, color: c.accent } })];
+  const fill = { type: "linear", x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: `${c.accent}40` }, { offset: 1, color: `${c.accent}00` }] };
+  const series: object[] = [
+    line("Penutupan", x, close, c.accent, { lineStyle: { width: 1.6, color: c.accent }, areaStyle: { color: fill } }),
+  ];
   if (ma) {
     series.push(line("MA 50", x, sma(p.close, 50).slice(i0), c.accent2, { lineStyle: { width: 1, type: "dotted", color: c.accent2 } }));
     series.push(line("MA 200", x, sma(p.close, 200).slice(i0), c.muted, { lineStyle: { width: 1, type: "dotted", color: c.muted } }));
   }
   const hits = marks.flatMap((m) => {
-    const i = lowerBound(x, m.detected.slice(0, 10)); // hari bursa pertama pada/setelah deteksi
+    const i = lowerBound(x, m.detected.slice(0, 10));
     return i < x.length && m.detected >= x[0] ? [{ value: [x[i], close[i]], name: `${m.period} ${m.year} ${m.status}` }] : [];
   });
   if (hits.length) {
     series.push({ type: "scatter", name: "Sinyal", data: hits, symbol: "triangle", symbolSize: 11, itemStyle: { color: c.up },
       tooltip: { trigger: "item", formatter: (q: { name: string }) => q.name } });
   }
-  const vol = p.x.map((d, i) => [d, p.volume[i]] as const).slice(i0).filter((_, i) => !p.noTrade[i0 + i]);
-  series.push({ type: "bar", name: "Volume", xAxisIndex: 1, yAxisIndex: 1, data: vol, itemStyle: { color: c.muted }, large: true });
-  s.yAxis[1] = { ...s.yAxis[1], axisLabel: { color: c.muted, formatter: (v: number) => compact(v) } };
+  const vol = p.x.flatMap((d, g) =>
+    g < i0 || p.noTrade[g] ? [] : [{
+      value: [d, p.volume[g]],
+      itemStyle: { color: g === 0 || p.close[g] >= p.close[g - 1] ? c.up : c.down, opacity: 0.6 },
+    }],
+  );
+  series.push({ type: "bar", name: "Volume", xAxisIndex: 1, yAxisIndex: 1, data: vol });
 
-  return baseOption(c, { ...s, series, legend: { top: 0, data: series.slice(0, -1).map((o) => (o as { name: string }).name), textStyle: { color: c.muted } } });
+  const base = baseOption(c, {
+    ...s,
+    series,
+    legend: {
+      show: ma || hits.length > 0, top: 0, icon: "roundRect",
+      data: series.slice(0, -1).map((o) => (o as { name: string }).name), textStyle: { color: c.muted },
+    },
+  }) as Record<string, unknown>;
+
+  const formatter = (ps: { seriesName: string; marker: string; value: [string, number | null] }[]) => {
+    const head = day(String(ps[0]?.value?.[0] ?? ""));
+    const rows = ps
+      .filter((q) => q.seriesName !== "Sinyal" && q.value?.[1] != null)
+      .map((q) => `${q.marker}${q.seriesName}: <b>${q.seriesName === "Volume" ? compact(q.value[1] as number) : num(q.value[1] as number, 0)}</b>`);
+    return [head, ...rows].join("<br/>");
+  };
+  return { ...base, tooltip: { ...(base.tooltip as object), formatter } };
 }
 
 function PriceTab({ ticker }: { ticker: string }) {
@@ -152,9 +152,15 @@ function PriceView({ p, marks }: { p: Prices; marks: SignalMark[] }) {
       </div>
       <div className="toolbar">
         <Segmented label="Rentang" value={range} onChange={setRange} options={Object.keys(RANGES).map((k) => ({ value: k, label: k }))} />
-        <label className="check"><input type="checkbox" checked={ma === "1"} onChange={(e) => setMa(e.target.checked ? "1" : "0")} /> Rata-rata bergerak</label>
+        <label className="switch">
+          <input type="checkbox" checked={ma === "1"} onChange={(e) => setMa(e.target.checked ? "1" : "0")} />
+          <span>MA 50 &amp; 200</span>
+        </label>
       </div>
-      <Chart option={option} height={480} label={`Grafik harga penutupan dan volume, ${range}`} />
+      <div className="card">
+        <Chart option={option} height={480} label={`Grafik harga penutupan dan volume, ${range}`} />
+        <p className="muted small">Ctrl + scroll atau cubit untuk zoom, seret untuk menggeser.</p>
+      </div>
     </>
   );
 }

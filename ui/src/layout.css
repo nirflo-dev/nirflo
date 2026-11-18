@@ -116,8 +116,7 @@ details.more summary{cursor:pointer;font-weight:600;margin-bottom:12px}
 .hero h2{font-size:28px}
 .hero p{margin:0}
 .hero .eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-2);font-weight:600;margin-bottom:4px}
-.home-search input{width:260px;font-size:16px}
-@media(max-width:600px){.home-search{width:100%}.home-search input{width:100%}}
+.hero .tsearch{width:min(100%,360px)}
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:14px 0}
 .stat{position:relative;display:flex;flex-direction:column;gap:2px;padding:14px 16px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:inherit;text-decoration:none;overflow:hidden;transition:border-color .12s,transform .12s}
 a.stat:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--border));transform:translateY(-1px)}
@@ -155,3 +154,38 @@ a.stat:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--border));tra
   button,select,input{min-height:42px}
   input,select{font-size:16px}
 }
+
+.field input,.field select{height:40px}
+.side .account{margin-top:auto}
+@media(max-width:860px){.side .account{margin:0 0 0 auto}}
+
+.topbar{display:flex;align-items:center;gap:12px;margin:0 0 18px}
+.topbar .tsearch{flex:1;max-width:420px}
+.pill{margin-left:auto;display:inline-flex;align-items:center;gap:8px;padding:5px 12px;border:1px solid var(--border);border-radius:999px;font-size:12.5px;color:var(--muted);text-decoration:none;white-space:nowrap}
+.pill:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--border));color:var(--text)}
+.pill .dot{margin-right:0}
+.pill.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 50%,var(--border))}
+@media(max-width:600px){.topbar .tsearch{max-width:none}.pill .pill-text{display:none}.pill{padding:8px 10px}}
+
+.tsearch{position:relative;min-width:0}
+.tsearch-field{display:flex;flex-direction:column;gap:4px;font-size:13px}
+.tsearch-label{color:var(--muted);font-weight:500}
+.tsearch-input{display:flex;align-items:center;gap:8px;padding:0 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg);color:var(--muted);transition:border-color .12s,box-shadow .12s}
+.tsearch-input:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent);color:var(--text)}
+.tsearch-input svg{flex:none}
+.tsearch-input input,.tsearch-input input:focus{flex:1;min-width:0;height:auto;border:0;border-radius:0;background:none;box-shadow:none;padding:9px 0;font-size:15px;color:var(--text)}
+.tsearch.compact .tsearch-input input{padding:7px 0;font-size:14px}
+.tsearch-input kbd{margin-left:auto}
+.tsearch-pop{position:absolute;z-index:40;top:calc(100% + 6px);left:0;right:0;min-width:280px;max-height:340px;overflow:auto;margin:0;padding:6px;list-style:none;border:1px solid var(--border);border-radius:var(--radius);background:var(--raised);box-shadow:0 12px 32px rgba(0,0,0,.45)}
+.tsearch-pop li[role=option]{display:flex;align-items:baseline;gap:12px;padding:8px 10px;border-radius:var(--radius-sm);cursor:pointer}
+.tsearch-pop li[role=option] strong{min-width:52px}
+.tsearch-pop li[role=option] span{color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tsearch-pop li.on{background:color-mix(in srgb,var(--accent) 18%,transparent)}
+.tsearch-head,.tsearch-empty{padding:8px 10px;color:var(--muted);font-size:12px}
+.tsearch-head{text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+
+.switch{display:inline-flex;align-items:center;gap:10px;cursor:pointer;font-weight:500}
+.switch input{appearance:none;-webkit-appearance:none;width:36px;height:20px;min-height:0;padding:0;border-radius:999px;background:var(--raised);border:1px solid var(--border);position:relative;cursor:pointer;transition:background .15s,border-color .15s}
+.switch input::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--muted);transition:transform .15s,background .15s}
+.switch input:checked{background:color-mix(in srgb,var(--accent) 35%,var(--raised));border-color:var(--accent)}
+.switch input:checked::after{transform:translateX(16px);background:var(--accent-2)}
