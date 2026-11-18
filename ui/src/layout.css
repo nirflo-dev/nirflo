@@ -189,3 +189,74 @@ a.stat:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--border));tra
 .switch input::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--muted);transition:transform .15s,background .15s}
 .switch input:checked{background:color-mix(in srgb,var(--accent) 35%,var(--raised));border-color:var(--accent)}
 .switch input:checked::after{transform:translateX(16px);background:var(--accent-2)}
+
+/* Halaman Makro: chart di kiri, daftar indikator di kanan (dapat diseret dan ditutup) */
+.macro{display:grid;grid-template-columns:minmax(0,1fr) 12px var(--macro-w,360px);align-items:stretch;margin-top:12px}
+.macro.collapsed{grid-template-columns:minmax(0,1fr)}
+.macro-main{min-width:0}
+.macro-main .toolbar{margin-top:0}
+
+.macro-toggle{position:relative;margin-left:auto;display:inline-grid;place-items:center;width:40px;height:40px;padding:0;color:var(--muted);cursor:pointer;border:1px solid var(--border);border-radius:8px;background:none}
+.macro-toggle:hover{color:var(--text);border-color:var(--accent)}
+.macro-toggle.on{color:var(--accent);border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.macro-toggle .count{position:absolute;top:-6px;right:-6px;min-width:18px;padding:0 5px;border-radius:999px;font-size:11px;line-height:18px;text-align:center;color:#fff;background:var(--accent)}
+
+.macro-sel{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.macro-sel button{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;font-size:13px;color:var(--text);cursor:pointer;border:1px solid var(--border);border-radius:999px;background:none}
+.macro-sel button:hover:not(:disabled){border-color:var(--accent)}
+.macro-sel button:disabled{cursor:default}
+.mdot{flex:none;width:10px;height:10px;border-radius:50%;border:2px solid var(--muted);background:transparent}
+.macro-sel .mdot{border:0}
+
+/* Panel: tinggi mengikuti kolom chart, isinya menggulir di dalam */
+.macro-list{position:relative;margin:0;padding:0;min-width:0;min-height:560px;overflow:hidden}
+.macro-scroll{position:absolute;inset:0;overflow-y:auto;padding:0 12px 12px}
+.macro-listhead{position:sticky;top:0;z-index:1;display:flex;gap:8px;align-items:center;padding:12px 0 8px;background:var(--surface)}
+.macro-listhead input{flex:1;min-width:0;height:36px}
+
+.mgroup h4{margin:12px 0 2px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.mrow{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:10px;align-items:center;width:100%;padding:6px 8px;font:inherit;font-size:13.5px;color:var(--text);text-align:left;cursor:pointer;border:0;border-radius:6px;background:none}
+.mrow:hover{background:color-mix(in srgb,var(--text) 6%,transparent)}
+.mrow.on{background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.mrow:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.mrow-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mrow.on .mrow-name{font-weight:600}
+.mrow-val{font-weight:600;text-align:right}
+.mrow-chg{min-width:58px;font-size:12.5px;text-align:right;color:var(--muted)}
+.mrow-chg.up{color:var(--up)}.mrow-chg.down{color:var(--down)}
+
+.macro-resize{position:relative;cursor:col-resize;touch-action:none;outline:none}
+.macro-resize::after{content:"";position:absolute;top:0;bottom:0;left:50%;width:2px;transform:translateX(-50%);border-radius:2px;background:transparent;transition:background .12s}
+.macro-resize:hover::after,.macro-resize:focus-visible::after{background:var(--accent)}
+
+/* Hubungan antar indikator */
+.pair-note{margin:0 0 10px;font-size:13px}
+.pairs{list-style:none;margin:0;padding:0}
+.pair{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(120px,1fr) 190px;gap:16px;align-items:center;padding:10px 0;border-top:1px solid var(--border)}
+.pair:first-child{border-top:0}
+.pair-names{font-weight:600}
+.pair-names i{margin:0 4px;font-style:normal;color:var(--muted)}
+.pair-bar{position:relative;height:10px;border-radius:5px;background:color-mix(in srgb,var(--text) 8%,transparent)}
+.pair-bar::before{content:"";position:absolute;top:-3px;bottom:-3px;left:50%;width:1px;background:var(--muted)}
+.pair-bar b{position:absolute;top:0;bottom:0;border-radius:5px}
+.pair-bar b.pos{background:var(--accent)}
+.pair-bar b.neg{background:var(--s3)}
+.pair-text{display:flex;flex-direction:column}
+.pair-text small{color:var(--muted);font-size:12px}
+
+@media(max-width:1100px){
+  .macro{grid-template-columns:minmax(0,1fr);gap:16px}
+  .macro-resize{display:none}
+  .macro-list{min-height:0;height:480px}
+  .pair{grid-template-columns:minmax(0,1fr);gap:6px}
+}
+.macro-listhead .tsearch{flex:1}
+.macro-listhead .tsearch-pop{min-width:0}
+.macro-listhead .tsearch-pop li[role=option]{flex-wrap:wrap;gap:0 10px}
+.macro-listhead .tsearch-pop li[role=option] strong{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.macro-listhead .tsearch-pop li[role=option] span{order:3;flex:0 0 100%;font-size:12px}
+.tsearch-pop em{margin-left:auto;font-style:normal;font-size:11.5px;color:var(--accent-2);white-space:nowrap}
+.tsearch-head{display:flex;justify-content:space-between;align-items:center}
+.tsearch-clear{padding:0;border:0;background:none;color:var(--accent-2);font-size:12px;font-weight:500;letter-spacing:0;text-transform:none;cursor:pointer}
+.tsearch-clear:hover:not(:disabled){border:0;text-decoration:underline}
+.tsearch-input input[type=search]{-webkit-appearance:none;appearance:none}
