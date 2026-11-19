@@ -4,7 +4,7 @@ import { SignIn, useAuth } from "@clerk/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { setTokenGetter } from "../lib/api";
 import { Logo } from "./Logo";
-import { Loading } from "./ui";
+import { Loader } from "./Loader";
 
 const LandingPage = lazy(() => import("../pages/LandingPage"));
 
@@ -36,11 +36,11 @@ export function AuthGate({ children }: { children: ReactNode }) {
     if (isLoaded && !isSignedIn) qc.clear();
   }, [isLoaded, isSignedIn, qc]);
 
-  if (!isLoaded) return <Loading />;
+  if (!isLoaded) return <Loader fullscreen />;
   if (isSignedIn) return pathname === LOGIN_PATH ? <Navigate to="/" replace /> : <>{children}</>;
   if (pathname === "/") {
     return (
-      <Suspense fallback={<Loading />}>
+      <Suspense fallback={<Loader fullscreen />}>
         <LandingPage />
       </Suspense>
     );

@@ -1,5 +1,5 @@
 import {
-  useEffect, useId, useMemo, useRef, useState,
+  useEffect, useId, useLayoutEffect, useMemo, useRef, useState,
   type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode,
 } from "react";
 import { Link } from "react-router-dom";
@@ -407,10 +407,10 @@ function SignalList() {
 
 type DemoTab = "risiko" | "kepastian" | "korelasi" | "makro";
 const DEMO_TABS: readonly TabItem<DemoTab>[] = [
+  { id: "makro", label: "Makro" },
   { id: "risiko", label: "Risiko" },
   { id: "kepastian", label: "Kepastian" },
   { id: "korelasi", label: "Korelasi" },
-  { id: "makro", label: "Makro" },
 ];
 const DEMO_CAPTION: Record<DemoTab, string> = {
   risiko: "Bobot adalah porsi uang Anda di sebuah saham. Risiko adalah seberapa besar saham itu menggerakkan naik-turunnya portofolio.",
@@ -421,7 +421,7 @@ const DEMO_CAPTION: Record<DemoTab, string> = {
 
 function DemoCard() {
   const reduced = useReduced();
-  const [tab, setTab] = useState<DemoTab>("risiko");
+  const [tab, setTab] = useState<DemoTab>("makro");
   const [auto, setAuto] = useState(true);
   const [paused, setPaused] = useState(false);
   const next = () => setTab((t) => DEMO_TABS[(DEMO_TABS.findIndex((x) => x.id === t) + 1) % DEMO_TABS.length].id);
@@ -448,19 +448,44 @@ function DemoCard() {
   );
 }
 
-const AUDIENCES = ["pemula", "mahasiswa", "karyawan", "pemilik usaha", "investor berpengalaman"] as const;
+const AUDIENCES = ["pemula", "pelajar", "pekerja", "karyawan", "investor", "mahasiswa", "pengusaha"] as const;
 
 function Audience() {
   const reduced = useReduced();
-  const [i, setI] = useState(0);
+  const [cur, setCur] = useState(0);
+  const [prev, setPrev] = useState<number | null>(null);
+  const [width, setWidth] = useState<number | null>(null);
+  const idx = useRef(0);
+  const word = useRef<HTMLSpanElement>(null);
+
   useEffect(() => {
     if (reduced) return;
-    const t = setInterval(() => setI((v) => (v + 1) % AUDIENCES.length), 2400);
+    const t = setInterval(() => {
+      const p = idx.current;
+      idx.current = (p + 1) % AUDIENCES.length;
+      setPrev(p);
+      setCur(idx.current);
+    }, 2600);
     return () => clearInterval(t);
   }, [reduced]);
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      if (word.current) setWidth(word.current.offsetWidth);
+    };
+    measure();
+    document.fonts?.ready.then(measure);
+  }, [cur]);
+
   return (
     <p className="lp-aud lp-in" style={delay(200)}>
-      Dirancang untuk <span className="lp-rot" aria-hidden><span key={i} className="lp-rot-word">{AUDIENCES[i]}</span></span>
+      Dirancang untuk{" "}
+      <span className="lp-rot" aria-hidden style={width ? { width } : undefined}>
+        {prev !== null && (
+          <span key={`o${prev}`} className="lp-rot-word out" onAnimationEnd={() => setPrev(null)}>{AUDIENCES[prev]}</span>
+        )}
+        <span key={cur} ref={word} className="lp-rot-word in">{AUDIENCES[cur]}</span>
+      </span>
       <span className="lp-sr">{AUDIENCES.join(", ")}</span>, apa pun latar belakang Anda.
     </p>
   );

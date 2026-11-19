@@ -4,10 +4,9 @@ import { downloadCsv, num } from "../lib/format";
 import { store } from "../lib/hooks";
 import type { TableData } from "../lib/types";
 import { Icon } from "./Icon";
+import { Loader } from "./Loader";
 
-export const Loading = ({ label = "Memuat…" }: { label?: string }) => (
-  <div className="state" role="status" aria-live="polite"><span className="spin" aria-hidden />{label}</div>
-);
+export const Loading = ({ label = "Memuat…" }: { label?: string }) => <Loader label={label} />;
 export const Empty = ({ children }: { children: ReactNode }) => <div className="state empty">{children}</div>;
 
 export function ErrorState({ error, retry }: { error: unknown; retry?: () => void }) {
