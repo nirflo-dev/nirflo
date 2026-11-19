@@ -448,7 +448,7 @@ function DemoCard() {
   );
 }
 
-const AUDIENCES = ["pemula", "pelajar", "pekerja", "karyawan", "investor", "mahasiswa", "pengusaha"] as const;
+const AUDIENCES = ["Pemula", "Pelajar", "Pekerja", "Karyawan", "Investor", "Mahasiswa", "Pengusaha"] as const;
 
 function Audience() {
   const reduced = useReduced();
@@ -594,7 +594,7 @@ const PRINCIPLES: readonly Principle[] = [
     icon: "search",
     title: "Transparan dan dibangun bersama",
     body: "Cara hitung, asumsi, dan batasan data ditampilkan apa adanya. Kode sumbernya terbuka di GitHub dengan lisensi MIT, sehingga siapa pun dapat memeriksa, mengusulkan perbaikan, atau menambahkan alat baru.",
-    gain: "Anda tidak perlu percaya begitu saja; Anda bisa memeriksanya sendiri.",
+    gain: "Anda tidak perlu percaya begitu saja, Anda bisa memeriksanya sendiri.",
   },
 ];
 

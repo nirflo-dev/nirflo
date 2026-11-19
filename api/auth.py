@@ -28,7 +28,7 @@ def clerk_display_name(clerk_id: str) -> str | None:
     try:
         u = clerk.users.get(user_id=clerk_id)
     except Exception as exc:
-        log.warning("gagal mengambil profil Clerk: %s", exc)
+        log.warning("Gagal mengambil profil Clerk: %s", exc)
         return None
     full = " ".join(p for p in (u.first_name, u.last_name) if p).strip()
     if full:
