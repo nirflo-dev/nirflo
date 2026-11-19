@@ -117,6 +117,8 @@ details.more summary{cursor:pointer;font-weight:600;margin-bottom:12px}
 .hero p{margin:0}
 .hero .eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-2);font-weight:600;margin-bottom:4px}
 .hero .tsearch{width:min(100%,360px)}
+.hero{position:relative;z-index:30}
+.tsearch-pop{z-index:60}
 
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:14px 0}
 .stat{position:relative;display:flex;flex-direction:column;gap:2px;padding:14px 16px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:inherit;text-decoration:none;overflow:hidden;transition:border-color .12s,transform .12s}
@@ -130,10 +132,17 @@ a.stat:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--border));tra
 @keyframes shine{to{background-position:-200% 0}}
 
 /* Tata letak beranda: portofolio di kiri atas, sinyal memanjang di kanan */
-.home-grid{display:grid;gap:14px;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);grid-template-areas:"portfolio signals" "macro signals"}
+.home-grid{display:grid;gap:14px;align-items:stretch;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);grid-template-areas:"portfolio signals" "macro signals"}
 .home-grid>.card{margin:0;min-width:0}
-.home-signals{grid-area:signals}.home-portfolio{grid-area:portfolio}.home-macro{grid-area:macro}
-@media(max-width:1100px){.home-grid{grid-template-columns:minmax(0,1fr);grid-template-areas:"portfolio" "signals" "macro"}}
+.home-signals{grid-area:signals;min-height:440px}.home-portfolio{grid-area:portfolio}.home-macro{grid-area:macro}
+@media(max-width:1100px){
+  .home-grid{grid-template-columns:minmax(0,1fr);grid-template-areas:"portfolio" "signals" "macro"}
+  .home-signals{height:480px;min-height:0}
+}
+.home-panel{display:flex;flex-direction:column}
+.home-panel .card-head h3{display:flex;align-items:center;gap:10px}
+.panel-count{padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--muted);background:color-mix(in srgb,var(--text) 8%,transparent)}
+.panel-fill{position:relative;flex:1;min-height:0}
 
 .rows{list-style:none;margin:0;padding:0}
 .row-link{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 4px;border-bottom:1px solid var(--border);color:inherit;text-decoration:none;transition:background .12s}
@@ -152,29 +161,51 @@ a.stat:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--border));tra
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .empty-cta{display:flex;flex-direction:column;align-items:flex-start;gap:12px}
 
-/* Ringkasan portofolio: donat bobot + temuan + daftar */
-.pf-glance{display:grid;grid-template-columns:176px minmax(0,1fr);gap:24px;align-items:center}
-.donut{display:block;width:100%;height:auto}
-.donut-track{fill:none;stroke:color-mix(in srgb,var(--text) 8%,transparent);stroke-width:10}
-.donut-seg{fill:none;stroke-width:10;transition:stroke-dasharray .9s cubic-bezier(.22,.8,.25,1)}
-.donut-val{font-size:16px;font-weight:650;fill:var(--text)}
-.donut-cap{font-size:6.5px;letter-spacing:.06em;text-transform:uppercase;fill:var(--muted)}
-.pf-side{display:flex;flex-direction:column;gap:10px;min-width:0}
-.pf-finding{margin:0;font-size:13.5px;color:var(--muted)}
-.hl{list-style:none;margin:2px 0 0;padding:0}
-.hl-row{display:grid;grid-template-columns:10px minmax(0,1fr) 64px 64px;gap:10px;align-items:center;padding:7px 0;border-top:1px solid var(--border);font-size:13.5px}
-.hl-row .n{text-align:right}
-.hl-row .over{color:var(--warn);font-weight:600}
-.hl-head{padding:0 0 5px;border-top:0;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
-.hl-dot{width:10px;height:10px;border-radius:50%}
+/* Daftar yang dapat digulir: bayangan pudar hanya di tepi yang masih punya isi */
+.scroll{--ft:0px;--fb:0px;overflow-y:auto;outline:none;scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--text) 28%,transparent) transparent;
+  -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 var(--ft),#000 calc(100% - var(--fb)),transparent 100%);
+  mask-image:linear-gradient(to bottom,transparent 0,#000 var(--ft),#000 calc(100% - var(--fb)),transparent 100%)}
+.scroll.fade-top{--ft:22px}
+.scroll.fade-bottom{--fb:34px}
+.scroll:focus-visible{box-shadow:inset 0 0 0 2px var(--accent);border-radius:8px}
+.scroll.abs{position:absolute;inset:0}
+.scroll.box.mac{max-height:320px}
+.scroll.box.pf{max-height:232px}
+.scroll-in{padding-right:6px}
+
+/* Ringkasan portofolio: sama dengan halaman Portofolio, versi ringkas */
+.hp-body{display:flex;flex-direction:column;gap:14px}
+.hp-top{display:grid;grid-template-columns:176px minmax(0,1fr);gap:24px;align-items:center}
+.hp-donut{display:flex;flex-direction:column;align-items:center;gap:10px}
+.hp-donut .donut-wrap{width:168px}
+.hp-read{display:flex;flex-direction:column;gap:10px;min-width:0}
+.hp-sharpe{display:grid;grid-template-columns:auto auto;justify-content:start;align-items:center;column-gap:12px;row-gap:2px;margin:-8px -10px;padding:8px 10px;
+  color:inherit;text-decoration:none;border-radius:var(--radius-sm);transition:background .12s}
+.hp-sharpe:hover,.hp-sharpe:focus-visible{background:color-mix(in srgb,var(--text) 5%,transparent)}
+.hp-sharpe .lbl{grid-column:1/-1;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.hp-sharpe-val{font-size:34px;font-weight:650;letter-spacing:-.02em;line-height:1.1}
+.hp-finding{margin:0;font-size:13.5px;color:var(--muted)}
+.hp-note{margin:0;font-size:12px;color:var(--muted)}
+
+.hp-cols,.hp-row{display:grid;grid-template-columns:10px 64px minmax(0,1fr) 64px 64px;gap:10px;align-items:center}
+.hp-cols{padding:0 8px 4px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border)}
+.hp-cols .n,.hp-row .n{text-align:right;white-space:nowrap}
+.hp-list{list-style:none;margin:0;padding:0}
+.hp-row{padding:8px;border-radius:6px;color:inherit;text-decoration:none;font-size:13.5px;transition:background .12s}
+.hp-row:hover,.hp-row.hot,.hp-row:focus-visible{background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.hp-row:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.hp-dot{width:10px;height:10px;border-radius:50%}
+.hp-bars{display:flex;flex-direction:column;gap:4px;min-width:0}
+.hp-bars .bar{height:6px;transition:width .8s cubic-bezier(.22,.8,.25,1)}
+.hp-row .over{color:var(--warn);font-weight:600}
 @media(max-width:600px){
-  .pf-glance{grid-template-columns:minmax(0,1fr)}
-  .pf-donut{width:176px;margin:0 auto}
+  .hp-top{grid-template-columns:minmax(0,1fr)}
+  .hp-cols,.hp-row{grid-template-columns:10px 52px minmax(0,1fr) 52px 52px}
 }
 
 /* Kerangka pemuatan */
-.skel{display:flex;flex-direction:column;gap:12px;padding:4px 0}
-.skel i{display:block;height:14px;border-radius:6px;background:linear-gradient(90deg,var(--raised),color-mix(in srgb,var(--text) 8%,var(--raised)),var(--raised));background-size:200% 100%;animation:shine 1.2s linear infinite}
+.sk-list{display:flex;flex-direction:column;gap:12px;padding:4px 0}
+.sk-list i{display:block;height:14px;border-radius:6px;background:linear-gradient(90deg,var(--raised),color-mix(in srgb,var(--text) 8%,var(--raised)),var(--raised));background-size:200% 100%;animation:shine 1.2s linear infinite}
 
 /* Animasi masuk: halus, hanya saat dimuat */
 @keyframes rise{from{opacity:0;transform:translateY(8px)}}
@@ -184,9 +215,9 @@ a.stat:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--border));tra
 .home-grid>.card:nth-child(2){animation-delay:.06s}
 .home-grid>.card:nth-child(3){animation-delay:.12s}
 @media(prefers-reduced-motion:reduce){
-  .skeleton .stat-value,.skel i{animation:none}
+  .skeleton .stat-value,.sk-list i{animation:none}
   .stat,.home-grid>.card{animation:none}
-  .donut-seg,.more-link svg{transition:none}
+  .more-link svg,.hp-bars .bar{transition:none}
 }
 
 .login{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:16px;background:radial-gradient(900px 500px at 50% -10%,color-mix(in srgb,var(--accent) 20%,transparent),transparent),var(--bg)}
@@ -311,8 +342,8 @@ a.stat:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--border));tra
 @media(prefers-reduced-motion:reduce){.rise,.pfx-insights li,.stk,.stk-buys,.pfx-form,.pfx-menu{animation:none}}
 
 .collapse{display:grid;grid-template-rows:1fr;transition:grid-template-rows .28s ease}
-.card.closed .collapse{grid-template-rows:0fr}
-.collapse-inner{min-height:0;overflow:hidden;padding:4px;margin:-4px}
+.card.closed .collapse{grid-template-rows:0fr;flex:0 0 auto}
+.collapse-inner{display:flex;flex-direction:column;min-height:0;overflow:hidden;padding:4px;margin:-4px}
 
 .donut-wrap{position:relative;width:208px;height:208px}
 .donut{width:100%;height:100%;transform:rotate(-90deg)}

@@ -1,14 +1,17 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useUser } from "@clerk/react";
 import { useMacroOverview, useMacroSeries, useMeta, useScanPeriods, useScanResults } from "../lib/api";
 import { day, num, pct, tone } from "../lib/format";
 import { macroLabel } from "../lib/macroNames";
+import { useCountUp, useMounted } from "../lib/motion";
 import { useEvaluation, usePortfolios, type Evaluation, type SharpeBlock } from "../lib/portfolio";
 import type { MacroRow, ScanRow } from "../lib/types";
-import { Chip } from "../components/ui";
+import { Donut, type Slice } from "../components/Donut";
 import { Icon } from "../components/Icon";
 import { TickerSearch } from "../components/TickerSearch";
+import { Chip, Segmented } from "../components/ui";
+import "./portfolio.css";
 
 const VERDICT: Record<SharpeBlock["verdict"], string> = {
   positif: "Di atas suku bunga",
@@ -18,24 +21,50 @@ const VERDICT: Record<SharpeBlock["verdict"], string> = {
 };
 
 const DEFAULT_PORTFOLIO = "default";
+const SIGNAL_LIMIT = 30;
 /** Indikator makro dianggap terbaru bila tanggalnya paling jauh ini dari data paling baru. */
 const FRESH_DAYS = 45;
-const PALETTE = ["var(--s1)", "var(--s2)", "var(--s3)", "var(--s5)", "var(--s6)"];
-const OTHERS = "var(--s8)";
 
 const greeting = () => {
   const h = new Date().getHours();
   return h < 11 ? "Selamat pagi" : h < 15 ? "Selamat siang" : h < 18 ? "Selamat sore" : "Selamat malam";
 };
 const reason = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
+const bar = (v: number) => `${Math.max(0, Math.min(100, v * 100))}%`;
+
+/**
+ * Titik 1 bulan terakhir, dimulai dari penutupan terakhir pada atau sebelum tanggal yang sama bulan lalu.
+ * Dasarnya sama dengan perubahan 1 bulan dari API, sehingga garis dan angka selalu searah.
+ */
+function lastMonth(s?: { x: string[]; y: number[] }): { y: number[]; since: string } | undefined {
+  if (!s || s.y.length < 2) return undefined;
+  const end = new Date(s.x[s.x.length - 1]);
+  if (Number.isNaN(end.getTime())) {
+    const i = Math.max(0, s.x.length - 22); // cadangan: sekitar 22 hari bursa
+    return { y: s.y.slice(i), since: s.x[i] };
+  }
+  const cut = new Date(end);
+  cut.setMonth(cut.getMonth() - 1);
+  let start = 0;
+  for (let i = 0; i < s.x.length; i++) {
+    if (new Date(s.x[i]) <= cut) start = i;
+    else break;
+  }
+  return { y: s.y.slice(start), since: s.x[start] };
+}
 
 /* ---------- Komponen dasar ---------- */
 
-function Panel({ title, area, action, children }: { title: string; area: string; action?: ReactNode; children: ReactNode }) {
+function Panel({ title, meta, area, action, fill, children }: {
+  title: string; meta?: string; area: string; action?: ReactNode; fill?: boolean; children: ReactNode;
+}) {
   return (
-    <section className={`card panel ${area}`}>
-      <header className="card-head"><h3>{title}</h3>{action}</header>
-      {children}
+    <section className={`card home-panel ${area}`}>
+      <header className="card-head">
+        <h3>{title}{meta && <span className="panel-count">{meta}</span>}</h3>
+        {action}
+      </header>
+      {fill ? <div className="panel-fill">{children}</div> : children}
     </section>
   );
 }
@@ -45,10 +74,40 @@ const More = ({ to, children }: { to: string; children: ReactNode }) => (
 );
 
 const Skel = ({ rows = 3 }: { rows?: number }) => (
-  <div className="skel" role="status" aria-label="Memuat">
+  <div className="sk-list" role="status" aria-label="Memuat">
     {Array.from({ length: rows }, (_, i) => <i key={i} style={{ width: `${92 - i * 12}%` }} />)}
   </div>
 );
+
+/** Daftar yang dapat digulir. Bayangan pudar di tepi muncul hanya bila masih ada isi di arah itu. */
+function ScrollList({ label, className = "", children }: { label: string; className?: string; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [edge, setEdge] = useState({ up: false, down: false });
+  const measure = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    const up = el.scrollTop > 2;
+    const down = el.scrollHeight - el.clientHeight - el.scrollTop > 2;
+    setEdge((p) => (p.up === up && p.down === down ? p : { up, down }));
+  }, []);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    return () => ro.disconnect();
+  }, [measure]);
+  return (
+    <div
+      ref={ref} role="region" aria-label={label} tabIndex={0} onScroll={measure}
+      className={`scroll ${className}${edge.up ? " fade-top" : ""}${edge.down ? " fade-bottom" : ""}`}
+    >
+      <div className="scroll-in">{children}</div>
+    </div>
+  );
+}
 
 function Spark({ values, color }: { values: number[]; color: string }) {
   if (values.length < 2) return null;
@@ -61,16 +120,20 @@ function Spark({ values, color }: { values: number[]; color: string }) {
   );
 }
 
-function Stat({ label, value, delta, hint, spark, href, loading }: {
-  label: string; value: string; delta?: number | null; hint?: string; spark?: number[]; href: string; loading?: boolean;
+function Stat({ label, value, delta, hint, spark, since, href, loading }: {
+  label: string; value: string; delta?: number | null; hint?: string; spark?: number[]; since?: string; href: string; loading?: boolean;
 }) {
-  const color = delta == null ? "var(--accent)" : delta < 0 ? "var(--down)" : "var(--up)";
+  // Warna garis mengikuti arah garis itu sendiri, bukan tanda persen, agar keduanya selalu cocok.
+  const trend = spark && spark.length > 1 ? spark[spark.length - 1] - spark[0] : delta;
+  const color = trend == null || trend === 0 ? "var(--accent)" : trend < 0 ? "var(--down)" : "var(--up)";
   return (
     <Link to={href} className={`stat${loading ? " skeleton" : ""}`}>
       <span className="stat-label">{label}</span>
       <strong className="stat-value">{loading ? "…" : value}</strong>
       <span className="stat-sub">
-        {delta != null && <b className={tone(delta)}>{pct(delta, 1, true)}</b>}
+        {delta != null && (
+          <b className={tone(delta)} title={since ? `Dibanding penutupan ${day(since)}` : undefined}>{pct(delta, 1, true)}</b>
+        )}
         {hint && <small>{hint}</small>}
       </span>
       {spark && <Spark values={spark} color={color} />}
@@ -102,63 +165,105 @@ function SignalList({ rows }: { rows: ScanRow[] }) {
 
 /* ---------- Portofolio ---------- */
 
-type Slice = { t: string; w: number; r: number; color: string; other?: boolean };
-
-/** Lima saham terbesar berwarna sendiri, sisanya digabung agar donat tetap mudah dibaca. */
-function toSlices(e: Evaluation): Slice[] {
-  const all = Object.keys(e.weights)
-    .map((t) => ({ t, w: e.weights[t] ?? 0, r: e.risk_contribution[t] ?? 0 }))
-    .filter((x) => x.w > 0)
-    .sort((a, b) => b.w - a.w);
-  const head: Slice[] = all.slice(0, PALETTE.length).map((x, i) => ({ ...x, color: PALETTE[i] }));
-  const rest = all.slice(PALETTE.length);
-  if (!rest.length) return head;
-  const sum = (k: "w" | "r") => rest.reduce((a, x) => a + x[k], 0);
-  return [...head, { t: `Lainnya (${rest.length})`, w: sum("w"), r: sum("r"), color: OTHERS, other: true }];
-}
+type PfRow = { t: string; w: number; r: number };
 
 /** Satu kalimat temuan: apakah risiko terpusat lebih besar daripada porsi bobotnya. */
-function finding(slices: Slice[]): string {
-  const named = slices.filter((s) => !s.other);
-  if (slices.length < 2) return "Portofolio satu saham: seluruh risiko terpusat pada satu emiten.";
-  const top = [...named].sort((a, b) => b.r - a.r)[0];
-  if (top && top.r - top.w > 0.05) return `${top.t} menyumbang ${pct(top.r, 1)} risiko dengan bobot ${pct(top.w, 1)}.`;
+function finding(rows: PfRow[]): string {
+  if (rows.length < 2) return "Portofolio satu saham: seluruh risiko terpusat pada satu emiten.";
+  const top = [...rows].sort((a, b) => b.r - a.r)[0];
+  if (top.r - top.w > 0.05) return `${top.t} menyumbang ${pct(top.r, 1)} risiko dengan bobot ${pct(top.w, 1)}.`;
   return "Kontribusi risiko sejalan dengan bobot tiap saham.";
 }
 
-function Donut({ slices, value, caption }: { slices: Slice[]; value: string; caption: string }) {
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    const id = window.setTimeout(() => setReady(true), 40);
-    return () => window.clearTimeout(id);
-  }, []);
-  const R = 42, C = 2 * Math.PI * R, gap = slices.length > 1 ? 1.4 : 0;
-  let acc = 0;
+function PortfolioBody({ e, href }: { e: Evaluation; href: string }) {
+  const [view, setView] = useState<"w" | "r">("w");
+  const [hover, setHover] = useState<string | null>(null);
+  const grown = useMounted();
+  const sharpe = e.sharpe.current_weights;
+  const animated = useCountUp(sharpe.sharpe);
+
+  // Urutan dan warna sama dengan halaman Portofolio, supaya saham yang sama selalu berwarna sama.
+  const rows: PfRow[] = useMemo(
+    () => Object.keys(e.weights)
+      .map((t) => ({ t, w: e.weights[t] ?? 0, r: e.risk_contribution[t] ?? 0 }))
+      .filter((x) => x.w > 0)
+      .sort((a, b) => b.w - a.w),
+    [e],
+  );
+  const colorOf = (t: string) => `var(--s${(Math.max(0, rows.findIndex((x) => x.t === t)) % 8) + 1})`;
+
+  const raw: Slice[] = rows.map((x) => ({ key: x.t, value: Math.max(0, view === "w" ? x.w : x.r), color: colorOf(x.t) }));
+  const slices: Slice[] = (() => {
+    if (raw.length <= 8) return raw;
+    const sorted = [...raw].sort((a, b) => b.value - a.value);
+    const rest = sorted.slice(7).reduce((s, x) => s + x.value, 0);
+    return [...sorted.slice(0, 7), { key: "Lainnya", value: rest, color: "var(--s8)" }];
+  })();
+  const total = slices.reduce((s, x) => s + x.value, 0) || 1;
+  const hot = hover ? slices.find((s) => s.key === hover) : undefined;
+
   return (
-    <svg className="donut" viewBox="0 0 100 100" role="img" aria-label="Komposisi bobot portofolio">
-      <circle className="donut-track" cx="50" cy="50" r={R} />
-      {slices.map((s, i) => {
-        const len = s.w * C;
-        const offset = -acc;
-        acc += len;
-        return (
-          <circle
-            key={s.t} className="donut-seg" cx="50" cy="50" r={R} transform="rotate(-90 50 50)"
-            style={{ stroke: s.color, transitionDelay: `${i * 90}ms` }}
-            strokeDasharray={ready ? `${Math.max(len - gap, 0)} ${C}` : `0 ${C}`} strokeDashoffset={offset}
+    <div className="hp-body">
+      <div className="hp-top">
+        <div className="hp-donut">
+          <div className="donut-wrap">
+            <Donut slices={slices} hover={hover} onHover={setHover} label={view === "w" ? "Komposisi bobot per saham" : "Kontribusi risiko per saham"} />
+            <div className="donut-center">
+              {hot ? <><strong>{pct(hot.value / total, 1)}</strong><small>{hot.key}</small></> : <><strong>{rows.length}</strong><small>saham</small></>}
+            </div>
+          </div>
+          <Segmented
+            label="Tampilan donat" value={view} onChange={setView}
+            options={[{ value: "w", label: "Bobot" }, { value: "r", label: "Risiko" }]}
           />
-        );
-      })}
-      <text className="donut-val" x="50" y="52" textAnchor="middle">{value}</text>
-      <text className="donut-cap" x="50" y="64" textAnchor="middle">{caption}</text>
-    </svg>
+        </div>
+
+        <div className="hp-read">
+          <Link to={href} className="hp-sharpe" title="Buka perhitungan lengkap">
+            <span className="lbl">Sharpe ratio</span>
+            <strong className={`hp-sharpe-val ${tone(sharpe.sharpe)}`}>{animated == null ? "-" : num(animated, 2)}</strong>
+            <Chip kind={sharpe.verdict}>{VERDICT[sharpe.verdict]}</Chip>
+          </Link>
+          <p className="hp-finding">{finding(rows)}</p>
+          {!e.window && <p className="hp-note">Estimasi cepat dari statistik universe. Perhitungan lengkap ada di halaman Portofolio.</p>}
+        </div>
+      </div>
+
+      <div className="hp-cols" aria-hidden>
+        <span /><span>Saham</span><span />
+        <span className="n"><i className="sw bw" />Bobot</span>
+        <span className="n"><i className="sw br" />Risiko</span>
+      </div>
+      <ScrollList label="Daftar saham portofolio" className="box pf">
+        <ul className="hp-list">
+          {rows.map((x) => (
+            <li key={x.t}>
+              <Link
+                to={`/emiten/${x.t}`} title={`Buka ${x.t}`} className={`hp-row${hover === x.t ? " hot" : ""}`}
+                onMouseEnter={() => setHover(x.t)} onMouseLeave={() => setHover(null)}
+                onFocus={() => setHover(x.t)} onBlur={() => setHover(null)}
+              >
+                <i className="hp-dot" style={{ background: colorOf(x.t) }} />
+                <strong>{x.t}</strong>
+                <span className="hp-bars">
+                  <i className="bar bw" style={{ width: grown ? bar(x.w) : "0%" }} />
+                  <i className="bar br" style={{ width: grown ? bar(x.r) : "0%" }} />
+                </span>
+                <span className="n">{pct(x.w, 1)}</span>
+                <span className={`n${x.r - x.w > 0.05 ? " over" : ""}`}>{pct(x.r, 1)}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </ScrollList>
+    </div>
   );
 }
 
 function PortfolioGlance({ name, loading, listError, evalError, e, href }: {
   name?: string; loading: boolean; listError: unknown; evalError?: string; e?: Evaluation; href: string;
 }) {
-  if (loading) return <Skel rows={4} />;
+  if (loading) return <Skel rows={5} />;
   if (listError) return <p className="muted">{reason(listError, "Portofolio belum dapat dimuat.")}</p>;
   if (!name) {
     return (
@@ -176,57 +281,38 @@ function PortfolioGlance({ name, loading, listError, evalError, e, href }: {
       </div>
     );
   }
-  const slices = toSlices(e);
-  const sharpe = e.sharpe.current_weights;
-  return (
-    <div className="pf-glance">
-      <div className="pf-donut">
-        <Donut slices={slices} value={sharpe.sharpe == null ? "-" : num(sharpe.sharpe, 2)} caption="Sharpe" />
-      </div>
-      <div className="pf-side">
-        <div className="pf-verdict">
-          <Chip kind={sharpe.verdict}>{VERDICT[sharpe.verdict]}</Chip>
-        </div>
-        <p className="pf-finding">{finding(slices)}</p>
-        <ul className="hl">
-          <li className="hl-row hl-head"><span /><span>Saham</span><span className="n">Bobot</span><span className="n">Risiko</span></li>
-          {slices.map((s) => (
-            <li key={s.t} className="hl-row">
-              <i className="hl-dot" style={{ background: s.color }} />
-              <strong>{s.t}</strong>
-              <span className="n">{pct(s.w, 1)}</span>
-              <span className={`n${!s.other && s.r - s.w > 0.05 ? " over" : ""}`}>{pct(s.r, 1)}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-    </div>
-  );
+  return <PortfolioBody e={e} href={href} />;
 }
 
 /* ---------- Makro ---------- */
 
-function MacroMovers({ rows, loading, error }: { rows?: MacroRow[]; loading: boolean; error: boolean }) {
+/** Indikator yang datanya terbaru, diurutkan dari perubahan 1 bulan terbesar. */
+function freshMovers(rows: MacroRow[] | undefined): MacroRow[] {
+  const time = (r: MacroRow) => new Date(r.last_date).getTime() || 0;
+  const dated = (rows ?? []).filter((r) => r.change1m != null);
+  const newest = Math.max(0, ...dated.map(time));
+  return dated
+    .filter((r) => newest - time(r) <= FRESH_DAYS * 86_400_000)
+    .sort((a, b) => Math.abs(b.change1m ?? 0) - Math.abs(a.change1m ?? 0));
+}
+
+function MacroMovers({ rows, loading, error }: { rows: MacroRow[]; loading: boolean; error: boolean }) {
   if (loading) return <Skel rows={5} />;
   if (error) return <p className="muted">Data makro belum bisa dimuat.</p>;
-  const dated = (rows ?? []).filter((r) => r.change1m != null);
-  const newest = Math.max(0, ...dated.map((r) => new Date(r.last_date).getTime() || 0));
-  const top = dated
-    .filter((r) => newest - (new Date(r.last_date).getTime() || 0) <= FRESH_DAYS * 86_400_000)
-    .sort((a, b) => Math.abs(b.change1m ?? 0) - Math.abs(a.change1m ?? 0))
-    .slice(0, 5);
-  if (!top.length) return <p className="muted">Belum ada data makro terbaru.</p>;
+  if (!rows.length) return <p className="muted">Belum ada data makro terbaru.</p>;
   return (
-    <ul className="rows">
-      {top.map((r) => (
-        <li key={r.key}>
-          <Link to={`/makro?k=${encodeURIComponent(r.key)}`} className="row-link">
-            <span className="row-main"><strong>{macroLabel(r)}</strong><small>{r.key}</small></span>
-            <span className="row-meta"><span>{num(r.last_value, 2)}</span><b className={tone(r.change1m)}>{pct(r.change1m, 1, true)}</b></span>
-          </Link>
-        </li>
-      ))}
-    </ul>
+    <ScrollList label="Daftar pergerakan makro" className="box mac">
+      <ul className="rows">
+        {rows.map((r) => (
+          <li key={r.key}>
+            <Link to={`/makro?k=${encodeURIComponent(r.key)}`} className="row-link">
+              <span className="row-main"><strong>{macroLabel(r)}</strong><small>{r.key}</small></span>
+              <span className="row-meta"><span>{num(r.last_value, 2)}</span><b className={tone(r.change1m)}>{pct(r.change1m, 1, true)}</b></span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </ScrollList>
   );
 }
 
@@ -249,17 +335,23 @@ export default function HomePage() {
   const pick = (k: string) => macro.data?.find((r) => r.key === k);
   const ihsg = pick("IHSG");
   const fx = pick("USDIDR");
+  const ihsgSeries = lastMonth(series.data?.series["IHSG"]);
+  const fxSeries = lastMonth(series.data?.series["USDIDR"]);
   const counts = scan.data?.counts;
   const active = (counts?.STRONG ?? 0) + (counts?.MODERATE ?? 0);
-  const top = (scan.data?.rows ?? [])
+  const signals = (scan.data?.rows ?? [])
     .filter((r) => r.status === "STRONG" || r.status === "MODERATE")
-    .sort((a, b) => Math.abs(b.z_score ?? 0) - Math.abs(a.z_score ?? 0))
-    .slice(0, 6);
+    .sort((a, b) => Math.abs(b.z_score ?? 0) - Math.abs(a.z_score ?? 0));
+  const shown = signals.slice(0, SIGNAL_LIMIT);
+  const movers = freshMovers(macro.data);
 
   const scanLoading = periods.isPending || (Boolean(latest) && scan.isPending);
   const pfLoading = pfs.isPending || (Boolean(pfName) && quick.isPending);
   // Nama portofolio hanya ditampilkan bila bukan bawaan.
   const pfTitle = pfName && pfName !== DEFAULT_PORTFOLIO ? `Portofolio · ${pfName}` : "Portofolio";
+  const signalMeta = signals.length
+    ? (shown.length < signals.length ? `${shown.length} dari ${signals.length}` : String(signals.length))
+    : undefined;
 
   return (
     <>
@@ -275,8 +367,14 @@ export default function HomePage() {
       </section>
 
       <div className="stats">
-        <Stat label="IHSG" value={num(ihsg?.last_value, 2)} delta={ihsg?.change1m} hint="1 bulan" spark={series.data?.series["IHSG"]?.y} loading={macro.isPending} href="/makro?k=IHSG" />
-        <Stat label="USD/IDR" value={num(fx?.last_value, 0)} delta={fx?.change1m} hint="1 bulan" spark={series.data?.series["USDIDR"]?.y} loading={macro.isPending} href="/makro?k=USDIDR" />
+        <Stat
+          label="IHSG" value={num(ihsg?.last_value, 2)} delta={ihsg?.change1m} hint="1 bulan"
+          spark={ihsgSeries?.y} since={ihsgSeries?.since} loading={macro.isPending} href="/makro?k=IHSG"
+        />
+        <Stat
+          label="USD/IDR" value={num(fx?.last_value, 0)} delta={fx?.change1m} hint="1 bulan"
+          spark={fxSeries?.y} since={fxSeries?.since} loading={macro.isPending} href="/makro?k=USDIDR"
+        />
         <Stat
           label="Sinyal aktif" value={String(active)} hint={latest ? `${latest.period} ${latest.year}` : "belum ada pemindaian"}
           loading={scanLoading} href="/sinyal?tab=scan"
@@ -290,13 +388,16 @@ export default function HomePage() {
             evalError={quick.isError ? reason(quick.error, "") || undefined : undefined} e={quick.data}
           />
         </Panel>
-        <Panel title="Sinyal terbaru" area="home-signals" action={<More to="/sinyal?tab=scan">Buka pemindai</More>}>
-          {scanLoading ? <Skel rows={5} />
+        <Panel title="Sinyal terbaru" meta={signalMeta} area="home-signals" fill action={<More to="/sinyal?tab=scan">Buka pemindai</More>}>
+          {scanLoading ? <Skel rows={6} />
             : periods.isError || scan.isError ? <p className="muted">Hasil pemindaian belum tersedia.</p>
-            : <SignalList rows={top} />}
+            : <ScrollList label="Daftar sinyal" className="abs"><SignalList rows={shown} /></ScrollList>}
         </Panel>
-        <Panel title="Pergerakan makro 1 bulan" area="home-macro" action={<More to="/makro">Jelajahi makro</More>}>
-          <MacroMovers rows={macro.data} loading={macro.isPending} error={macro.isError} />
+        <Panel
+          title="Pergerakan makro 1 bulan" meta={movers.length ? `${movers.length} indikator` : undefined}
+          area="home-macro" action={<More to="/makro">Jelajahi makro</More>}
+        >
+          <MacroMovers rows={movers} loading={macro.isPending} error={macro.isError} />
         </Panel>
       </div>
     </>

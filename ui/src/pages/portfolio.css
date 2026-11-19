@@ -1,5 +1,6 @@
 .pfx-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:18px}
 .pfx-head p{margin:0}
+.pfx-reset{margin-left:12px}
 .pfx-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 
 .pfx-switch{position:relative}
@@ -15,7 +16,7 @@
 .pfx-menu form input{flex:1;height:36px}
 
 .pfx-hero{display:grid;grid-template-columns:auto minmax(0,1fr);gap:22px 36px;margin:0 0 14px;padding:22px 24px;background:radial-gradient(620px 240px at 0% 0%,color-mix(in srgb,var(--accent) 12%,transparent),transparent),var(--surface)}
-.pfx-donut{display:flex;flex-direction:column;align-items:center;gap:14px}
+.pfx-donut{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
 .pfx-read{display:flex;flex-direction:column;gap:16px;min-width:0}
 .pfx-sharpe{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px}
 .pfx-sharpe .lbl{flex:0 0 100%;font-size:12px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
@@ -35,21 +36,27 @@
 .pfx-facts dd{margin:0;font-weight:600}
 .pfx-facts dd small{display:block;font-size:12px;font-weight:400;color:var(--muted)}
 
-.pfx-grid{display:grid;row-gap:14px;column-gap:0;align-items:start;margin:0 0 14px;grid-template-columns:var(--cols,minmax(0,1.15fr) 14px minmax(0,1fr));grid-template-areas:"stocks gap perf" "stocks gap corr"}
-.pfx-grid.nocorr{grid-template-areas:"stocks gap perf"}
-.pfx-grid.solo{grid-template-columns:minmax(0,1fr);grid-template-areas:"stocks"}
-.pfx-grid>.card{margin:0;min-width:0}
-.pfx-stocks{grid-area:stocks}
-.pfx-perf{grid-area:perf}
-.pfx-corr{grid-area:corr}
-.pfx-gap{grid-area:gap;align-self:stretch}
-.pfx-hist{margin-top:0}
+.pfx-cols{display:grid;grid-template-columns:var(--cols,minmax(0,1fr) 14px minmax(0,1fr));align-items:stretch;margin:0 0 14px}
+.pfx-col{display:flex;flex-direction:column;gap:14px;min-width:0}
+.pfx-col>.card{display:flex;flex-direction:column;margin:0;min-width:0}
+.pfx-col>.card:last-child:not(.closed){flex:1 1 auto}
+.pfx-col>.card .collapse{flex:1 1 auto;min-height:0}
+.pfx-col>.card.closed .collapse{flex:0 0 auto}
+.pfx-gap{align-self:stretch}
+.pfx-hist{margin:0}
+
+.pfx-perf .collapse-inner>.rngs{flex:1 1 auto;justify-content:space-between;gap:18px}
+.pfx-corr .collapse-inner>.tablewrap{flex:1 1 auto;display:flex;flex-direction:column;max-height:none}
+.pfx-corr .tablewrap table{flex:1 1 auto}
+.pfx-corr .tablewrap td{min-width:64px}
+.pfx-pair{margin:0 0 12px;font-size:13.5px}
 
 .stk-head,button.stk-main{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,2fr) 76px 20px;gap:14px;align-items:center}
 .stk-head{padding:0 10px 8px;border-bottom:1px solid var(--border);font-size:11.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
 .stk-head span:nth-child(3){text-align:right}
-.stk-list{margin:0;padding:0;list-style:none}
-.stk{border-bottom:1px solid var(--border);animation:rise .4s ease both}
+.stk-list{flex:1 1 auto;display:flex;flex-direction:column;margin:0;padding:0;list-style:none}
+.stk{flex:1 1 auto;display:flex;flex-direction:column;justify-content:center;border-bottom:1px solid var(--border);animation:rise .4s ease both}
+.stk:not(.open){max-height:168px}
 .stk:last-child{border-bottom:0}
 button.stk-main{width:100%;padding:12px 10px;border:0;border-radius:var(--radius-sm);background:none;font-weight:400;text-align:left;cursor:pointer}
 button.stk-main:hover:not(:disabled),.stk.hot>button.stk-main{border:0;background:color-mix(in srgb,var(--text) 5%,transparent)}
@@ -85,7 +92,6 @@ button.stk-main:hover:not(:disabled),.stk.hot>button.stk-main{border:0;backgroun
 .rng-sub{display:block;margin-top:2px;font-size:12px;color:var(--muted)}
 .rng-ci,.rng-dot{transition:left .8s cubic-bezier(.2,.7,.2,1),width .8s cubic-bezier(.2,.7,.2,1)}
 .skels{display:grid;gap:14px}
-.pfx-pair{margin:0 0 12px;font-size:13.5px}
 
 .hist-empty{display:flex;align-items:center;gap:20px;padding:6px 4px}
 .hist-art{flex:none;width:96px;height:64px;color:var(--muted)}
@@ -100,9 +106,12 @@ button.stk-main:hover:not(:disabled),.stk.hot>button.stk-main{border:0;backgroun
 @media(prefers-reduced-motion:reduce){.skel{animation:none}.stk-f,.rng-ci,.rng-dot{transition:none}}
 
 @media(max-width:1100px){
-  .pfx-grid,.pfx-grid.nocorr{grid-template-columns:minmax(0,1fr);grid-template-areas:"stocks" "perf" "corr"}
-  .pfx-grid.nocorr{grid-template-areas:"stocks" "perf"}
+  .pfx-cols{display:flex;flex-direction:column;gap:14px}
+  .pfx-col{display:contents}
   .pfx-gap{display:none}
+  .pfx-stocks{order:1}
+  .pfx-perf{order:2}
+  .pfx-corr{order:3}
 }
 @media(max-width:760px){
   .pfx-hero{grid-template-columns:minmax(0,1fr);padding:18px}

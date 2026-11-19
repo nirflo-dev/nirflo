@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { useTickers } from "../lib/api";
 import { day, num, pct, tone } from "../lib/format";
-import { useColors, useParam, useSplit } from "../lib/hooks";
+import { store, useColors, useParam, useSplit } from "../lib/hooks";
 import { useCountUp, useMounted } from "../lib/motion";
 import {
   useEvaluation, useHistory, useHoldings, usePortfolioMutations, usePortfolios,
@@ -89,6 +89,7 @@ export default function PortfolioPage() {
   const [mode, setMode] = useParam("mode", "full");
   const [adding, setAdding] = useState(false);
   const [hover, setHover] = useState<string | null>(null);
+  const [layoutKey, setLayoutKey] = useState(0);
   const list = usePortfolios();
   const tickers = useTickers();
   const holdings = useHoldings(name);
@@ -97,7 +98,7 @@ export default function PortfolioPage() {
   const ev = useEvaluation(name, mode, hasHoldings);
   const e = hasHoldings ? ev.data : undefined;
   const count = e?.correlation.tickers.length ?? 0;
-  const split = useSplit("pf-split", 0.58, 0.4, 0.7);
+  const split = useSplit("pf-split-v2", 0.5, 0.4, 0.7);
 
   const sectors = useMemo(() => new Map((tickers.data ?? []).map((t) => [t.ticker, t.sector])), [tickers.data]);
   const sectorOf = (t: string) => sectors.get(t);
@@ -108,14 +109,37 @@ export default function PortfolioPage() {
   }, [holdings.data, e]);
   const colorOf = (t: string) => `var(--s${(Math.max(0, order.indexOf(t)) % 8) + 1})`;
 
+  const corrLeft = useMemo(() => {
+    const sharpeRows = e ? SHARPE_ROWS.filter(([k]) => e.sharpe[k]).length : 1;
+    const stocks = 150 + 108 * order.length;
+    const perf = 210 + 150 * sharpeRows;
+    const corr = 200 + 56 * count;
+    return Math.abs(stocks + corr - perf) <= Math.abs(stocks - (perf + corr));
+  }, [e, order.length, count]);
+
   useEffect(() => setAdding(false), [name]);
+
+  const resetLayout = () => {
+    ["pf-sharpe", "pf-corr", "pf-history"].forEach((id) => store.set(`sec:${id}`, "0"));
+    split.handle.onDoubleClick();
+    setLayoutKey((k) => k + 1);
+  };
+
+  const corrCard = e && count > 1 ? (
+    <Section title="Korelasi antar saham" className="pfx-corr rise d4" collapsible id="pf-corr">
+      <CorrelationPanel e={e} />
+    </Section>
+  ) : null;
 
   return (
     <>
       <header className="pfx-head">
         <div>
           <h2>Portofolio</h2>
-          <p className="muted">{e ? `${count} saham · data per ${day(e.as_of)}` : "Kinerja dan risiko portofolio saham IDX."}</p>
+          <p className="muted">
+            {e ? `${count} saham · data per ${day(e.as_of)}` : "Kinerja dan risiko portofolio saham IDX."}
+            <button type="button" className="pfx-link pfx-reset" onClick={resetLayout}>Atur ulang tampilan</button>
+          </p>
         </div>
         <div className="pfx-tools">
           <PortfolioSwitcher value={name} items={list.data ?? []} onChange={setName} />
@@ -142,25 +166,26 @@ export default function PortfolioPage() {
               : ev.isError ? <ErrorState error={ev.error} retry={() => ev.refetch()} />
               : null}
             <div
-              ref={split.ref} className={`pfx-grid${count > 1 ? "" : " nocorr"}`}
+              key={layoutKey} ref={split.ref} className="pfx-cols"
               style={{ "--cols": `minmax(0,${split.p.toFixed(3)}fr) 14px minmax(0,${(1 - split.p).toFixed(3)}fr)` } as CSSProperties}
             >
-              <StocksPanel
-                name={name} holdings={rows} e={e} sectorOf={sectorOf} colorOf={colorOf}
-                hover={hover} setHover={setHover} adding={adding} setAdding={setAdding}
-              />
+              <div className="pfx-col">
+                <StocksPanel
+                  name={name} holdings={rows} e={e} sectorOf={sectorOf} colorOf={colorOf}
+                  hover={hover} setHover={setHover} adding={adding} setAdding={setAdding}
+                />
+                {corrLeft && corrCard}
+              </div>
               <div className="split pfx-gap" title="Geser untuk mengubah lebar, klik dua kali untuk reset" {...split.handle} />
-              <PerformancePanel e={e} pending={ev.isPending} error={ev.error} retry={() => ev.refetch()} />
-              {e && count > 1 && (
-                <Section title="Korelasi antar saham" className="pfx-corr rise d4" collapsible id="pf-corr">
-                  <CorrelationPanel e={e} />
-                </Section>
-              )}
+              <div className="pfx-col">
+                <PerformancePanel e={e} pending={ev.isPending} error={ev.error} retry={() => ev.refetch()} />
+                {!corrLeft && corrCard}
+              </div>
             </div>
           </>
         )}
 
-      <HistoryPanel name={name} hasHoldings={hasHoldings} />
+      <HistoryPanel key={`h${layoutKey}`} name={name} hasHoldings={hasHoldings} />
     </>
   );
 }
