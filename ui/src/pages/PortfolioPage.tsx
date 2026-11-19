@@ -136,10 +136,7 @@ export default function PortfolioPage() {
       <header className="pfx-head">
         <div>
           <h2>Portofolio</h2>
-          <p className="muted">
-            {e ? `${count} saham · data per ${day(e.as_of)}` : "Kinerja dan risiko portofolio saham IDX."}
-            <button type="button" className="pfx-link pfx-reset" onClick={resetLayout}>Atur ulang tampilan</button>
-          </p>
+          <p className="muted">{e ? `${count} saham · data per ${day(e.as_of)}` : "Kinerja dan risiko portofolio saham IDX."}</p>
         </div>
         <div className="pfx-tools">
           <PortfolioSwitcher value={name} items={list.data ?? []} onChange={setName} />
@@ -148,7 +145,15 @@ export default function PortfolioPage() {
             options={[{ value: "full", label: "Lengkap" }, { value: "quick", label: "Cepat" }]}
           />
           {hasHoldings && (
-            <button className={adding ? "" : "primary"} onClick={() => setAdding(!adding)}>{adding ? "Tutup" : "+ Tambah posisi"}</button>
+            <>
+              <button
+                type="button" className="pfx-iconbtn" onClick={resetLayout}
+                title="Atur ulang tata letak" aria-label="Atur ulang tata letak"
+              >
+                <Icon name="refresh" size={18} />
+              </button>
+              <button className={adding ? "" : "primary"} onClick={() => setAdding(!adding)}>{adding ? "Tutup" : "+ Tambah posisi"}</button>
+            </>
           )}
         </div>
       </header>
@@ -563,6 +568,7 @@ function PerformancePanel({ e, pending, error, retry }: { e?: Evaluation; pendin
         ))}
       </ul>
       <p className="muted small">Batang adalah selang kepercayaan 95% dan garis putus-putus adalah nol. Jika batang melewati nol, hasilnya belum dapat dibedakan dari suku bunga bebas risiko.</p>
+      <p className="muted small">Suku bunga bebas risiko memakai suku bunga antarbank 3 bulan (rupiah), sesuai mata uang return saham IDX.</p>
       <details className="more">
         <summary>Rincian perhitungan</summary>
         <DataTable cols={cols} rows={rows} />

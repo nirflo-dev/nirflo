@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { useMacroOverview, useMacroSeries } from "../lib/api";
 import { day, num, pct, tone } from "../lib/format";
 import { useColors, useParam } from "../lib/hooks";
-import { addRecent, clearRecent, loadRecent } from "../lib/recent";
+import { addRecent, loadRecent } from "../lib/recent";
 import type { MacroRow, MacroSeries } from "../lib/types";
 import { baseOption, Chart, line, X, Y } from "../components/Chart";
 import { Icon } from "../components/Icon";
@@ -272,15 +272,7 @@ function MacroView({ rows }: { rows: MacroRow[] }) {
                   </span>
                   {popOpen && (
                     <ul className="tsearch-pop" role="listbox" id="macro-recent">
-                      <li className="tsearch-head" role="presentation">
-                        <span>Terakhir dipilih</span>
-                        <button
-                          type="button" className="tsearch-clear"
-                          onMouseDown={(e) => { e.preventDefault(); clearRecent(RECENT_KEY); setRecent([]); }}
-                        >
-                          Hapus
-                        </button>
-                      </li>
+                    <li className="tsearch-head" role="presentation">Terakhir dipilih</li>
                       {recentRows.map((r, i) => (
                         <li
                           key={r.key} id={`macro-recent-${r.key}`} role="option" aria-selected={i === active} className={i === active ? "on" : ""}

@@ -1,10 +1,11 @@
-import { lazy, Suspense, useRef, useState, type CSSProperties, type KeyboardEvent as KeyEvt, type PointerEvent as PtrEvt } from "react";
-import { NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as KeyEvt, type PointerEvent as PtrEvt } from "react";
+import { Link, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { UserButton, useUser } from "@clerk/react";
 import { useMeta } from "./lib/api";
 import { day, stampLabel } from "./lib/format";
 import { store } from "./lib/hooks";
 import { Icon, type IconName } from "./components/Icon";
+import { Logo } from "./components/Logo";
 import { TickerSearch } from "./components/TickerSearch";
 import { Empty, ErrorBoundary, ErrorState, Loading } from "./components/ui";
 
@@ -22,6 +23,22 @@ const NAV: readonly { to: string; label: string; icon: IconName; end?: boolean }
   { to: "/portofolio", label: "Portofolio", icon: "pie" },
   { to: "/makro", label: "Makro", icon: "globe" },
 ];
+
+const TITLES: Record<string, string> = {
+  "": "Beranda",
+  emiten: "Emiten",
+  sinyal: "Sinyal",
+  portofolio: "Portofolio",
+  makro: "Makro",
+  status: "Status data",
+};
+
+function pageTitle(pathname: string): string {
+  const [, section = "", ticker] = pathname.split("/");
+  if (section === "emiten" && ticker) return `${decodeURIComponent(ticker)} · Emiten · Nirflo`;
+  const name = TITLES[section];
+  return name ? `${name} · Nirflo` : "Nirflo";
+}
 
 const MIN_W = 72, MAX_W = 340, DEFAULT_W = 240, SNAP_W = 140;
 
@@ -81,6 +98,10 @@ export default function App() {
     ? `${m.source === "snapshot" ? `Snapshot R2 ${m.snapshot ? stampLabel(m.snapshot) : ""}` : `Data per ${day(m.lastPriceDate)}`}${stale ? " · tertinggal" : ""}`
     : meta.isPending ? "Memeriksa…" : "";
 
+  useEffect(() => {
+    document.title = pageTitle(pathname);
+  }, [pathname]);
+
   const pickTicker = (t: string) => {
     const tab = pathname.startsWith("/emiten") ? new URLSearchParams(search).get("tab") : null;
     nav(`/emiten/${t}${tab ? `?tab=${tab}` : ""}`);
@@ -93,7 +114,12 @@ export default function App() {
     >
       <a className="skip" href="#main">Lewati ke konten</a>
       <aside className="side">
-        <h1><span className="label">Nirflo</span></h1>
+        <h1>
+          <Link to="/" className="brand" aria-label="Nirflo, ke beranda" title="Nirflo">
+            <Logo size={32} />
+            <span className="label">Nirflo</span>
+          </Link>
+        </h1>
         <nav aria-label="Halaman utama">
           {NAV.map(({ to, label, icon, end }) => (
             <NavLink key={to} to={to} end={end} title={side.collapsed ? label : undefined} className={({ isActive }) => (isActive ? "active" : "")}>

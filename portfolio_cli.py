@@ -152,6 +152,31 @@ def cmd_history(args):
         return
     print(df.round(2).to_string(index=False))
 
+def cmd_list(args):
+    holdings = store.list_holdings(args.portfolio)
+    if holdings.empty:
+        print("belum ada holding")
+        return
+    print(holdings.to_string(index=False))
+
+
+def cmd_remove(args):
+    store.remove_holding(args.id, store.default_user_id())
+    print("dihapus")
+
+
+def cmd_check(args):
+    holdings, prices, no_trade = load_inputs(args.portfolio)
+    print(f"portofolio '{args.portfolio}': {len(holdings)} baris, {holdings['ticker'].nunique()} saham")
+    print(f"harga: {prices.index.min()} s.d. {prices.index.max()} ({len(prices)} baris)")
+    missing = prices.isna().sum()
+    missing = missing[missing > 0]
+    if missing.empty:
+        print("tidak ada nilai harga yang kosong")
+    else:
+        print("nilai harga kosong per saham:")
+        print(missing.to_string())
+
 def cmd_quick(args):
     holdings = store.list_holdings(args.portfolio, user_id=store.default_user_id())
     if holdings.empty:
