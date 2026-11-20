@@ -1,7 +1,10 @@
 import calendar
 import logging
+import os
+import threading
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 import pandas as pd
 import yfinance as yf
@@ -9,8 +12,11 @@ import yfinance as yf
 logger = logging.getLogger(__name__)
 
 FX_SYMBOL = "IDR=X"
+CACHE_FILE = Path(__file__).resolve().parent.parent / "cache" / "usdidr_closes.csv"
 
 HISTORY_PADDING_DAYS = 30
+HISTORY_EXTRA_DAYS = 365
+CACHE_START_TOLERANCE_DAYS = 5
 MAX_STALENESS_DAYS = 5
 MAX_OUTLIER_DEVIATION = 0.02
 OUTLIER_WINDOW = 11
@@ -21,7 +27,7 @@ _LEGACY_PERIOD_MONTH = {"Q1": 3, "Q2": 6, "Q3": 9, "Q4": 12, "FY": 12}
 
 
 class FxRateError(RuntimeError):
-    """Raised when a reliable USD/IDR rate cannot be resolved for the requested date."""
+    pass
 
 
 @dataclass(frozen=True)
@@ -32,8 +38,10 @@ class FxQuote:
     source: str
 
 
+_lock = threading.RLock()
 _history = None
 _history_start = None
+_history_source = None
 _failed_start = None
 _failed_message = None
 
@@ -47,10 +55,8 @@ def _to_date(value) -> date:
 
 
 def _download_history(start: date) -> pd.Series:
-    end = date.today() + timedelta(days=1)  # yfinance end date is exclusive
-    data = yf.Ticker(FX_SYMBOL).history(
-        start=start.isoformat(), end=end.isoformat(), auto_adjust=False
-    )
+    end = date.today() + timedelta(days=1)
+    data = yf.Ticker(FX_SYMBOL).history(start=start.isoformat(), end=end.isoformat(), auto_adjust=False)
     if data.empty:
         raise FxRateError(f"No USD/IDR data returned since {start}")
 
@@ -63,11 +69,9 @@ def _download_history(start: date) -> pd.Series:
     closes = pd.Series(closes.to_numpy(dtype=float), index=index.normalize())
     closes = closes[~closes.index.duplicated(keep="last")].sort_index()
 
-    # Data cleaning: drop single-day prints that deviate from the local median.
     local_median = closes.rolling(OUTLIER_WINDOW, center=True, min_periods=3).median()
     deviation = (closes / local_median - 1).abs()
-    rejected = closes[deviation > MAX_OUTLIER_DEVIATION]
-    for ts, value in rejected.items():
+    for ts, value in closes[deviation > MAX_OUTLIER_DEVIATION].items():
         logger.warning("Rejected outlier USD/IDR close %.2f on %s", value, ts.date())
     closes = closes[deviation <= MAX_OUTLIER_DEVIATION]
 
@@ -76,36 +80,82 @@ def _download_history(start: date) -> pd.Series:
     return closes.round(2)
 
 
+def _read_cache():
+    if not CACHE_FILE.is_file():
+        return None
+    try:
+        frame = pd.read_csv(CACHE_FILE, parse_dates=["date"])
+    except Exception:
+        return None
+    if frame.empty or "close" not in frame.columns:
+        return None
+    return pd.Series(frame["close"].to_numpy(dtype=float), index=pd.DatetimeIndex(frame["date"])).sort_index()
+
+
+def _write_cache(series: pd.Series) -> None:
+    CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    frame = pd.DataFrame({"date": series.index.strftime("%Y-%m-%d"), "close": series.to_numpy()})
+    tmp = CACHE_FILE.with_suffix(".tmp")
+    frame.to_csv(tmp, index=False)
+    os.replace(tmp, CACHE_FILE)
+
+
+def _cache_fetched_today() -> bool:
+    return datetime.fromtimestamp(CACHE_FILE.stat().st_mtime).date() == date.today()
+
+
 def _ensure_history(as_of: date) -> None:
-    global _history, _history_start, _failed_start, _failed_message
+    global _history, _history_start, _history_source, _failed_start, _failed_message
 
     needed_start = as_of - timedelta(days=HISTORY_PADDING_DAYS)
 
-    if _history is not None and _history_start <= needed_start:
-        return
-    if _failed_start is not None and needed_start >= _failed_start:
-        raise FxRateError(_failed_message)
+    with _lock:
+        if _history is not None and _history_start <= needed_start:
+            return
+        if _failed_start is not None and needed_start >= _failed_start:
+            raise FxRateError(_failed_message)
 
-    try:
-        _history = _download_history(needed_start)
-        _history_start = needed_start
+        cached = _read_cache()
+        usable = None
+        cached_first = None
+        if cached is not None:
+            cached_first = cached.index[0].date()
+            if cached_first <= needed_start + timedelta(days=CACHE_START_TOLERANCE_DAYS):
+                usable = cached
+                if pd.Timestamp(as_of) <= cached.index[-1] or _cache_fetched_today():
+                    _history, _history_source = cached, "cache"
+                    _history_start = cached_first - timedelta(days=CACHE_START_TOLERANCE_DAYS)
+                    return
+
+        fetch_start = needed_start - timedelta(days=HISTORY_EXTRA_DAYS)
+        if cached_first is not None:
+            fetch_start = min(fetch_start, cached_first)
+
+        try:
+            series = _download_history(fetch_start)
+        except Exception as exc:
+            if usable is not None:
+                _history, _history_source = usable, "cache"
+                _history_start = cached_first - timedelta(days=CACHE_START_TOLERANCE_DAYS)
+                logger.warning("Unduhan USD/IDR gagal (%s), memakai cache lama", exc)
+                return
+            message = str(exc) if isinstance(exc, FxRateError) else f"USD/IDR fetch failed: {exc}"
+            _failed_start, _failed_message = needed_start, message
+            if isinstance(exc, FxRateError):
+                raise
+            raise FxRateError(message) from exc
+
+        _history, _history_start, _history_source = series, fetch_start, "yfinance"
         _failed_start = None
         _failed_message = None
+        _write_cache(series)
         logger.info(
             "Loaded USD/IDR history: %d closes from %s to %s",
-            len(_history), _history.index[0].date(), _history.index[-1].date(),
+            len(series), series.index[0].date(), series.index[-1].date(),
         )
-    except FxRateError as exc:
-        _failed_start, _failed_message = needed_start, str(exc)
-        raise
-    except Exception as exc:
-        _failed_start = needed_start
-        _failed_message = f"USD/IDR fetch failed: {exc}"
-        raise FxRateError(_failed_message) from exc
 
 
 def get_fx_quote(as_of) -> FxQuote:
-    """Last valid USD/IDR close on or before as_of. Raises FxRateError if none is reliable."""
     target = _to_date(as_of)
     if target > date.today():
         raise FxRateError(f"As-of date {target} is in the future")
@@ -123,7 +173,12 @@ def get_fx_quote(as_of) -> FxQuote:
             f"Latest valid close is {gap_days} days before {target} (limit {MAX_STALENESS_DAYS})"
         )
 
-    return FxQuote(rate=float(closes.iloc[-1]), rate_date=rate_date, as_of=target, source="yfinance")
+    return FxQuote(
+        rate=float(closes.iloc[-1]),
+        rate_date=rate_date,
+        as_of=target,
+        source=_history_source or "yfinance",
+    )
 
 
 def _legacy_period_end(year: int, period: str) -> date:
@@ -134,8 +189,6 @@ def _legacy_period_end(year: int, period: str) -> date:
 
 
 def get_closing_rate(year: int = None, period: str = "FY", period_end=None, as_of=None) -> float:
-    """as_of takes precedence. Year and period are kept for older callers and map to the
-    calendar period end only when no explicit date is supplied."""
     if as_of is None:
         as_of = period_end if period_end is not None else _legacy_period_end(year, period)
     return get_fx_quote(as_of).rate
@@ -143,7 +196,6 @@ def get_closing_rate(year: int = None, period: str = "FY", period_end=None, as_o
 
 def convert_to_idr(value: float, currency: str, year: int = None, period: str = "FY",
                    period_end=None, as_of=None) -> float:
-    """Converts a value to IDR if its currency is USD; otherwise returns it unchanged."""
     if value is None or value == 0:
         return 0
     if currency and currency.upper() == "USD":

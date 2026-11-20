@@ -1,8 +1,6 @@
 import psycopg2
-import psycopg2.extras
 import yfinance as yf
 import pandas as pd
-import numpy as np
 import os
 import time
 import requests
@@ -12,7 +10,7 @@ from io import BytesIO
 from datetime import datetime, timedelta
 
 from core.config import DB_CONFIG as config
-from core.lse import LseClient, LseError, keys_configured
+from core import lse
 
 _scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False})
 
@@ -25,14 +23,7 @@ def log(msg):
     print(f"[{_ts()}] {msg}")
 
 
-# ==========================================
-# 2. MASTER API MAPPING (YFINANCE / FRED)
-# ==========================================
-# ==========================================
-# 2. MASTER API MAPPING (YFINANCE / FRED)
-# ==========================================
 API_MAP = {
-    # --- MARKET DATA (YAHOO FINANCE) ---
     'USDIDR': 'IDR=X',
     'DXY': 'DX-Y.NYB',
     'VIX': '^VIX',
@@ -44,7 +35,6 @@ API_MAP = {
     'COPPER': 'HG=F',
     'SILVER': 'SI=F',
 
-    # --- GLOBAL MACRO (FRED) ---
     'US_10Y': 'DGS10',
     'US_CPI': 'CPIAUCSL',
     'ID_CPI': 'IDNCPIALLMINMEI',
@@ -53,23 +43,19 @@ API_MAP = {
     'ID_GDP': 'IDNGDPRQPSMEI',
     'ID_RESERVES': 'TRESEGIDM052N',
 
-    # --- COMMODITY PROXIES (FRED) ---
     'NICKEL': 'PNICKUSDM',
     'BAUXITE': 'IR14200',
-    'TIN': 'PTINUSDM',           # Ticker Timah (USD per Metric Ton)
-    'COAL_GLOBAL': 'PCOALAUUSDM'  # Cadangan harga batu bara Australia (Newcastle)
+    'TIN': 'PTINUSDM',
+    'COAL_GLOBAL': 'PCOALAUUSDM'
 }
 
 SCALE_MAP = {
     'NICKEL': 1.0,
     'BAUXITE': 0.14,
-    'TIN': 1.0,                   # Skala normal untuk Timah USD/MT
-    'COAL_GLOBAL': 1.0            # Skala normal untuk batu bara global
+    'TIN': 1.0,
+    'COAL_GLOBAL': 1.0
 }
 
-# ==========================================
-# 2B. MASTER MAPPING — TABEL SEKI BANK INDONESIA
-# ==========================================
 BI_SEKI_MAP = {
     'ID_CURRENT_ACCOUNT': {
         'url': 'https://www.bi.go.id/SEKI/tabel/TABEL5_1.xls',
@@ -91,64 +77,12 @@ BI_SEKI_MAP = {
     },
 }
 
-LSE_OVERLAP_DAYS = 120
-
-LSE_MACRO_MAP = {
-    'ID_POLICY_RATE': {
-        'kind': 'observation', 'country': 'ID',
-        'codes': ('ID.interest_rate',), 'categories': ('interest_rate',),
-        'category': 'Interest_Rate',
-    },
-    'ID_INFLATION_YOY': {
-        'kind': 'observation', 'country': 'ID',
-        'codes': ('ID.inflation_rate',), 'categories': ('inflation_rate',),
-        'category': 'Inflation',
-    },
-    'ID_CORE_INFLATION': {
-        'kind': 'observation', 'country': 'ID',
-        'codes': ('ID.core_inflation_rate',), 'categories': ('core_inflation_rate',),
-        'category': 'Inflation',
-    },
-    'ID_GDP_YOY': {
-        'kind': 'observation', 'country': 'ID',
-        'codes': ('ID.gdp_growth_rate',), 'categories': ('gdp_growth_rate',),
-        'category': 'Growth',
-    },
-    'ID_UNEMPLOYMENT': {
-        'kind': 'observation', 'country': 'ID',
-        'codes': ('ID.unemployment_rate',), 'categories': ('unemployment_rate',),
-        'category': 'Labor',
-    },
-    'ID_PMI_MANUFACTURING': {
-        'kind': 'observation', 'country': 'ID',
-        'codes': ('ID.manufacturing_pmi',), 'categories': ('manufacturing_pmi',),
-        'category': 'Business_Activity',
-    },
-    'ID_10Y': {
-        'kind': 'yield', 'country': 'ID',
-        'codes': ('ID10Y',), 'categories': (),
-        'category': 'Interest_Rate',
-    },
-    'US_POLICY_RATE': {
-        'kind': 'observation', 'country': 'US',
-        'codes': ('US.interest_rate',), 'categories': ('interest_rate',),
-        'category': 'Interest_Rate',
-    },
-}
-
-LSE_MARKET_MAP = {
-    'USDIDR': {'market': 'forex', 'symbol': 'USD_IDR', 'timeframe': '1d'},
-}
-
 MONTH_MAP = {
     'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
     'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12,
 }
 QUARTER_MAP = {'Q1': 3, 'Q2': 6, 'Q3': 9, 'Q4': 12}
 
-# ==========================================
-# 2C. KONFIGURASI BPS (CPI GAP-FILL)
-# ==========================================
 BPS_API_KEY = os.getenv("BPS_API_KEY")
 BPS_TABLE_ID = 915
 BPS_DOMAIN = "0000"
@@ -173,9 +107,6 @@ def _clean(x):
     return str(x).replace('*', '').strip().upper()
 
 
-# ==========================================
-# 3A. HELPER: FRED DATA EXTRACTOR
-# ==========================================
 def fetch_fred_csv(series_id, start_date, end_date):
     url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
     try:
@@ -193,9 +124,6 @@ def fetch_fred_csv(series_id, start_date, end_date):
         return None
 
 
-# ==========================================
-# 3B. HELPER: PARSER TABEL SEKI (.xls -> time series)
-# ==========================================
 def fetch_bi_seki(entry):
     try:
         resp = _scraper.get(entry['url'], timeout=20)
@@ -302,9 +230,6 @@ def fetch_bi_seki(entry):
         return None
 
 
-# ==========================================
-# 3C. HELPER: BPS STATICTABLE (CPI GAP-FILL)
-# ==========================================
 def get_statictable_metadata(table_id, domain=BPS_DOMAIN, lang=BPS_LANG, key=BPS_API_KEY):
     url = (
         f"https://webapi.bps.go.id/v1/api/view/"
@@ -454,8 +379,6 @@ def sanity_check_cpi(hist, recon_df, yoy_df):
 
 
 def run_bps_cpi_gapfill(conn, cur):
-    """Dipanggil di akhir update_macro_data() — isi gap ID_CPI pakai chain YoY BPS,
-    hanya untuk periode setelah data FRED terakhir yang valid."""
     log("BPS_CPI_GAPFILL       | start")
 
     if not BPS_API_KEY:
@@ -472,9 +395,6 @@ def run_bps_cpi_gapfill(conn, cur):
         meta = get_statictable_metadata(BPS_TABLE_ID)
         raw = download_statictable_excel(meta)
 
-        # parse_bps_yoy_table sudah otomatis cuma ambil baris SETELAH last_valid_date —
-        # jadi kalau BPS belum rilis data baru, yoy_df bakal kosong dan berhenti di sini
-        # (efisiensi: gak ada perhitungan/upsert yang jalan sia-sia)
         yoy_df = parse_bps_yoy_table(raw, start_after=last_valid_date)
         if yoy_df.empty:
             log(f"BPS_CPI_GAPFILL       | UP_TO_DATE | tidak ada gap baru (anchor={last_valid_date})")
@@ -512,72 +432,8 @@ def run_bps_cpi_gapfill(conn, cur):
         conn.rollback()
 
 
-_LSE_RESOLVED = {}
-
-
-def lse_resolve(client, ticker_db):
-    if ticker_db in _LSE_RESOLVED:
-        return _LSE_RESOLVED[ticker_db]
-    spec = LSE_MACRO_MAP.get(ticker_db)
-    found = None
-    if spec:
-        found = client.resolve_macro(
-            spec['kind'], spec['country'], spec.get('categories', ()), spec.get('codes', ())
-        )
-    _LSE_RESOLVED[ticker_db] = found
-    return found
-
-
-def register_lse_tickers(conn, cur, client):
-    for ticker_db, spec in LSE_MACRO_MAP.items():
-        found = lse_resolve(client, ticker_db)
-        if found is None:
-            log(f"LSE_REGISTER          | {ticker_db:<22} | TIDAK DITEMUKAN | jalankan: python -m pipeline.lse_tools resolve")
-            continue
-        ensure_ticker_registered(
-            ticker_db, cur,
-            name=found.get('name') or ticker_db,
-            category=spec.get('category'),
-            unit=str(found.get('unit') or '').upper() or None,
-            frequency=str(found.get('frequency') or '').upper() or None,
-            data_source='LSE',
-        )
-    conn.commit()
-
-
-def fetch_lse(client, ticker_db, since, until):
-    market_spec = LSE_MARKET_MAP.get(ticker_db)
-    if market_spec:
-        frame = client.export_csv(
-            market=market_spec['market'],
-            symbol=market_spec['symbol'],
-            timeframe=market_spec.get('timeframe', '1d'),
-            **{'from': pd.Timestamp(since).strftime('%Y-%m-%d'), 'to': pd.Timestamp(until).strftime('%Y-%m-%d')},
-        )
-        if frame.empty or 'close' not in frame.columns or 'time' not in frame.columns:
-            return None
-        out = pd.DataFrame({
-            'Date': pd.to_datetime(frame['time'], utc=True).dt.tz_localize(None).dt.normalize(),
-            'Value': pd.to_numeric(frame['close'], errors='coerce'),
-        })
-        return out.dropna().drop_duplicates('Date', keep='last').sort_values('Date').reset_index(drop=True)
-
-    found = lse_resolve(client, ticker_db)
-    if found is None:
-        log(f"  {ticker_db:<24} | LSE_CODE_NOT_FOUND")
-        return None
-    spec = LSE_MACRO_MAP[ticker_db]
-    return client.macro_series(spec['kind'], found['code'], start=since, end=until)
-
-# ==========================================
-# 4. HELPER: CEK DATA TERAKHIR & UPSERT KE DB
-# ==========================================
 def _get_last_date(cur, ticker_db):
-    """Ambil tanggal terakhir yang sudah ada di DB untuk ticker ini.
-    None kalau ticker belum punya histori sama sekali."""
-    cur.execute("""
-        SELECT MAX(record_date) FROM macro_indicators WHERE indicator_ticker = %s;
-    """, (ticker_db,))
+    cur.execute("SELECT MAX(record_date) FROM macro_indicators WHERE indicator_ticker = %s;", (ticker_db,))
     result = cur.fetchone()[0]
     return pd.Timestamp(result) if result else None
 
@@ -597,32 +453,30 @@ def _upsert_dataframe(cur, ticker_db, df, data_source=None, is_estimated=False):
     return inserted_count
 
 
-# ==========================================
-# 5. CORE ENGINE: UPDATE PROCESS
-# ==========================================
-def update_macro_data(full_backfill: bool = False, backfill_years: int = 15):
-    """
-    full_backfill=False (default): perilaku normal, incremental update
-    ke depan dari data terakhir yang ada di DB — dipakai untuk run rutin
-    harian/mingguan.
-
-    full_backfill=True: SEKALI jalan untuk mengisi histori lama yang
-    belum ada di DB (misal ID_CPI/US_CPI/USDIDR yang kepotong mulai
-    2016 gara-gara rolling 10-tahun window). Mode ini MELEWATI filter
-    "cuma baris lebih baru dari last_date" — supaya data yang lebih tua
-    dari yang sudah ada tetap bisa masuk. ON CONFLICT DO UPDATE di
-    _upsert_dataframe() memastikan ini aman, tidak menimpa data yang
-    sudah benar di tanggal yang sama.
-    """
+def update_macro_data(full_backfill: bool = False, backfill_years: int = 15, only=None):
     mode_label = "FULL_BACKFILL" if full_backfill else "INCREMENTAL"
-    log(f"Macro sync v6.0 | mode={mode_label} | sources=YFINANCE,FRED,BI_SEKI, LSE")
+    scope = f" | only={','.join(only)}" if only else ""
+    log(f"MINTIGO-ENGINE | macro sync v6.1 | mode={mode_label}{scope} | sources=YFINANCE,FRED,BI_SEKI,LSE")
 
     try:
         conn = psycopg2.connect(**config)
         cur = conn.cursor()
 
+        if lse.enabled():
+            try:
+                found, missing = lse.register(cur)
+                conn.commit()
+                log(f"LSE_REGISTER          | OK | ditemukan={found} tidak_ditemukan={', '.join(missing) or '-'}")
+            except Exception as e:
+                conn.rollback()
+                log(f"LSE_REGISTER          | FAIL | {type(e).__name__}: {e}")
+        else:
+            log("LSE_REGISTER          | SKIP | LSE_API_KEYS tidak terbaca dari .env")
+
         cur.execute("SELECT ticker, data_source FROM macro_dictionary;")
         dictionary = cur.fetchall()
+        if only:
+            dictionary = [row for row in dictionary if row[1] in only]
 
         if not dictionary:
             log("ABORT | macro_dictionary empty")
@@ -640,7 +494,6 @@ def update_macro_data(full_backfill: bool = False, backfill_years: int = 15):
             try:
                 df = pd.DataFrame()
 
-                # --- EKSTRAKSI --- (tidak berubah)
                 if source == 'YFINANCE':
                     api_ticker = API_MAP.get(ticker_db)
                     if not api_ticker:
@@ -669,24 +522,23 @@ def update_macro_data(full_backfill: bool = False, backfill_years: int = 15):
                         n_skip += 1
                         continue
                     df = fetch_bi_seki(entry)
-                
+
                 elif source == 'LSE':
-                    if lse is None:
-                        log(f"{ticker_db:<24} | SKIP | LSE_API_KEYS belum diisi")
+                    if not lse.enabled():
+                        log(f"{ticker_db:<24} | SKIP | LSE_API_KEYS tidak terbaca")
                         n_skip += 1
                         continue
                     last_known = _get_last_date(cur, ticker_db)
                     since = start_date
                     if not full_backfill and last_known is not None:
-                        since = max(pd.Timestamp(start_date), last_known - timedelta(days=LSE_OVERLAP_DAYS))
-                    df = fetch_lse(lse, ticker_db, since, end_date)
+                        since = max(pd.Timestamp(start_date), last_known - timedelta(days=lse.OVERLAP_DAYS))
+                    df = lse.fetch(ticker_db, since, end_date)
 
                 else:
                     log(f"{ticker_db:<24} | SKIP | unrecognized source '{source}'")
                     n_skip += 1
                     continue
 
-                # --- VALIDASI ---
                 if df is None or df.empty:
                     log(f"{ticker_db:<24} | NO_DATA | source={source}")
                     n_empty += 1
@@ -694,10 +546,6 @@ def update_macro_data(full_backfill: bool = False, backfill_years: int = 15):
 
                 df = df.dropna(subset=['Value'])
 
-                # --- CEK DATA SUDAH TERSEDIA (EFISIENSI) ---
-                # HANYA diterapkan di mode incremental. Di mode full_backfill,
-                # filter ini DILEWATI supaya data lama (lebih tua dari yang
-                # sudah ada di DB) tetap bisa masuk.
                 last_date = _get_last_date(cur, ticker_db)
                 if source != 'LSE' and not full_backfill and last_date is not None:
                     df = df[pd.to_datetime(df['Date']) > last_date]
@@ -707,15 +555,17 @@ def update_macro_data(full_backfill: bool = False, backfill_years: int = 15):
                     n_uptodate += 1
                     continue
 
-                # --- SCALING ---
                 if ticker_db in SCALE_MAP:
                     df['Value'] = df['Value'] * SCALE_MAP[ticker_db]
                     log(f"{ticker_db:<24} | SCALE_APPLIED | factor={SCALE_MAP[ticker_db]}")
 
-                # --- DATABASE UPSERT ---
                 inserted_count = _upsert_dataframe(cur, ticker_db, df, data_source=source, is_estimated=False)
                 conn.commit()
-                log(f"{ticker_db:<24} | OK | source={source:<9} rows={inserted_count}")
+                newest = df.sort_values('Date').iloc[-1]
+                log(
+                    f"{ticker_db:<24} | OK | source={source:<9} rows={inserted_count} "
+                    f"terakhir={pd.Timestamp(newest['Date']).date()} nilai={float(newest['Value']):.4g}"
+                )
                 n_ok += 1
 
             except Exception as e:
@@ -725,7 +575,7 @@ def update_macro_data(full_backfill: bool = False, backfill_years: int = 15):
 
         log(f"SUMMARY | ok={n_ok} up_to_date={n_uptodate} empty={n_empty} skip={n_skip} fail={n_fail} total={len(dictionary)}")
 
-        if not full_backfill:
+        if not full_backfill and not only:
             run_bps_cpi_gapfill(conn, cur)
 
     except Exception as e:
@@ -739,7 +589,8 @@ def update_macro_data(full_backfill: bool = False, backfill_years: int = 15):
 
 if __name__ == "__main__":
     import sys
+    only_sources = ('LSE',) if "--lse-only" in sys.argv else None
     if "--backfill" in sys.argv:
-        update_macro_data(full_backfill=True, backfill_years=15)
+        update_macro_data(full_backfill=True, backfill_years=15, only=only_sources)
     else:
-        update_macro_data()
+        update_macro_data(only=only_sources)
