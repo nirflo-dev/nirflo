@@ -7,7 +7,7 @@ import { Icon, type IconName } from "../components/Icon";
 import { Logo } from "../components/Logo";
 import "./landing.css";
 
-const REPO = "https://github.com/septianbyk/nirflo";
+const REPO = "https://github.com/nirflo-dev/nirflo";
 const LOGIN = "/masuk";
 const TITLE = "Nirflo - Riset kuantitatif saham Indonesia";
 

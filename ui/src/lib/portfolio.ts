@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
 import type { Num } from "./types";
 
-export type PfSummary = { name: string; tickers: number; positions: number; firstBuy: string };
+export type PfSummary = { name: string; tickers: number; positions: number; firstBuy: string; cash: number };
 export type Holding = { id: number; portfolio: string; ticker: string; lots: number; buy_date: string };
 
 export type Verdict = "positif" | "negatif" | "tidak_pasti" | "tidak_dapat_dihitung";
@@ -10,14 +10,19 @@ export type SharpeBlock = {
   sharpe: Num; ci_low: Num; ci_high: Num; verdict: Verdict; annual_excess_return: Num; annual_vol: Num;
   start: string | null; end: string | null; n_obs: number; basis: string;
 };
+export type CashInfo = { amount: number; weight: number; stock_value: number; total_value: number };
+export type PortfolioRisk = { stock_vol: Num; total_vol: Num; stock_excess_return: Num; total_excess_return: Num };
 export type Evaluation = {
   mode: "full" | "quick";
   as_of: string;
   window: { weeks: number; start: string; end: string } | null;
+  /** Bobot dan kontribusi risiko dihitung dari bagian saham saja (jumlah 100%). */
   weights: Record<string, Num>;
   risk_contribution: Record<string, Num>;
   correlation: { tickers: string[]; matrix: Num[][]; average: Num };
   sharpe: { since_buy: SharpeBlock | null; current_weights: SharpeBlock; equal_weight: SharpeBlock | null };
+  cash: CashInfo;
+  portfolio_risk: PortfolioRisk;
   price_jumps: { ticker: string; date: string; return: Num }[];
   illiquid_tickers: string[];
   warnings: string[];
@@ -26,6 +31,12 @@ export type PfHistory = {
   x: string[]; sharpe_since_buy: Num[]; sharpe_current_weights: Num[]; sharpe_equal_weight: Num[];
   avg_correlation: Num[]; warnings: number[];
 };
+
+/** Portofolio gabungan (mix) bersifat virtual dan baca-saja: namanya "mix:A,B". */
+export const MIX_PREFIX = "mix:";
+export const isMix = (name: string) => name.startsWith(MIX_PREFIX);
+export const mixParts = (name: string) => name.slice(MIX_PREFIX.length).split(",").filter(Boolean);
+export const mixName = (parts: string[]) => MIX_PREFIX + [...parts].sort().join(",");
 
 const enc = encodeURIComponent;
 
@@ -55,9 +66,16 @@ export function usePortfolioMutations(name: string) {
     mutationFn: (id: number) => api(`/portfolio/holdings/${id}`, undefined, { method: "DELETE" }),
     onSuccess: refresh,
   });
+  const setCash = useMutation({
+    mutationFn: (amount: number) =>
+      api(`/portfolio/${enc(name)}/cash`, undefined, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ amount }),
+      }),
+    onSuccess: refresh,
+  });
   const snapshot = useMutation({
     mutationFn: () => api(`/portfolio/${enc(name)}/history`, undefined, { method: "POST" }),
     onSuccess: refresh,
   });
-  return { add, remove, snapshot };
+  return { add, remove, setCash, snapshot };
 }

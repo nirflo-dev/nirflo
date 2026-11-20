@@ -135,3 +135,49 @@ button.stk-main:hover:not(:disabled),.stk.hot>button.stk-main{border:0;backgroun
   .stk-chev{grid-area:chev}
   .hist-empty{flex-direction:column;align-items:flex-start}
 }
+
+/* Cash */
+.stk-dot.cash{background:var(--muted)}
+.cash-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:6px;padding:12px 10px;border-top:1px dashed var(--border)}
+.cash-name{display:flex;align-items:center;gap:10px;min-width:0}
+.cash-name small,.cash-val small{display:block;font-size:12px;color:var(--muted)}
+.cash-val{margin-left:auto;text-align:right}
+.cash-val b{display:block;font-variant-numeric:tabular-nums}
+.cash-form{display:flex;align-items:end;gap:10px;flex-wrap:wrap;width:100%}
+.cash-form .field{flex:1 1 220px}
+.cash-form input{height:40px}
+.pfx-unit.pre input{padding-left:42px;padding-right:12px}
+.pfx-unit.pre em{left:14px;right:auto}
+.pfx-cashnote{margin-top:14px;padding:10px 12px;border-left:3px solid var(--accent);border-radius:var(--radius-sm);background:color-mix(in srgb,var(--text) 4%,transparent)}
+.pfx-cashnote strong{display:block;margin-bottom:4px;font-size:13px}
+.pfx-cashnote p{margin:0;font-size:13px;color:var(--muted)}
+
+/* Gabungkan portofolio */
+.pfx-switch button strong{display:block;max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pfx-mix{display:grid;gap:4px;margin:8px 0 0;padding:10px 0 0;border:0;border-top:1px solid var(--border)}
+.pfx-mix legend{padding:0;margin-bottom:6px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.pfx-mix label{display:flex;align-items:center;gap:10px;padding:6px 4px;border-radius:var(--radius-sm);cursor:pointer}
+.pfx-mix label:hover{background:color-mix(in srgb,var(--text) 5%,transparent)}
+.pfx-mix label small{margin-left:auto;color:var(--muted)}
+.pfx-mix input{width:auto;height:auto}
+.pfx-mix .primary{margin-top:6px}
+.pfx-addwrap{scroll-margin-top:96px}
+
+/* Panel Tambah (saham dan cash) */
+.pfx-add{margin:0 0 16px;padding:18px;border:1px solid color-mix(in srgb,var(--accent) 45%,var(--border));box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 10%,transparent);scroll-margin-top:16px}
+.pfx-add.inline{margin:0;padding:0;border:0;box-shadow:none;background:none}
+.pfx-add-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:16px}
+.pfx-add-head>div{margin-right:auto}
+.pfx-add-head strong{display:block;font-size:16px}
+.pfx-add-head p{margin:2px 0 0;font-size:13px}
+.pfx-add .pfx-form{margin:0;padding:0;border:0;background:none;animation:none}
+.pfx-saved{grid-column:1/-1;margin:0;padding:8px 12px;border-left:3px solid var(--up);border-radius:var(--radius-sm);background:color-mix(in srgb,var(--up) 10%,transparent);font-size:13px}
+
+/* Form cash */
+.cash-form2{display:grid;gap:14px;max-width:460px}
+.cash-form2 input{height:40px}
+.pfx-chips{display:flex;gap:8px;flex-wrap:wrap}
+.pfx-chips button{height:32px;padding:0 14px;border-radius:999px;font-size:13px}
+.cash-preview{margin:0;font-size:14px;color:var(--muted)}
+.cash-preview strong{color:var(--text)}
+.cash-preview.bad{color:var(--down)}
