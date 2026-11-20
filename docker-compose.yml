@@ -3,8 +3,9 @@ name: pead-chrome
 services:
   pead-chrome:
     container_name: pead-chrome
-    shm_size: "2gb"
-    restart: unless-stopped
+    shm_size: "512mb"
+    mem_limit: 1536m
+    restart: "no"
     ports:
       - "127.0.0.1:${PEAD_CDP_PORT:-9222}:9222"
       - "127.0.0.1:${PEAD_VNC_PORT:-6080}:6080"
@@ -34,6 +35,21 @@ services:
         socat TCP-LISTEN:9222,fork,reuseaddr,bind=0.0.0.0 TCP:127.0.0.1:9223 &
         wait -n
 
+postgres:
+    image: postgres:16-alpine
+    container_name: inflo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-password_baru_kamu}
+      POSTGRES_DB: ${DB_NAME:-mintigo_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
 volumes:
   pead_chrome_profile:
     name: pead_chrome_profile
+  pgdata:
+    driver: local
