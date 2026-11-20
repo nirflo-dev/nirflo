@@ -480,10 +480,15 @@ function AddHolding({ name, onDone }: { name: string; onDone?: () => void }) {
           <TickerSearch compact remember={false} label="Cari emiten" placeholder="Kode atau sektor" onPick={setTicker} />
         )}
       </div>
-      <label className="field">
-        <span>Jumlah lot</span>
-        <input required type="number" inputMode="decimal" min={0.01} step={0.01} value={lots} onChange={(e) => setLots(e.target.value)} />
-        <small>1 lot = 100 lembar</small>
+            <label className="field">
+        <span>
+          Jumlah lot
+          <small>{Number(lots) > 0 ? `${Math.round(Number(lots) * 100).toLocaleString("id-ID")} lembar` : "1 lot = 100 lembar"}</small>
+        </span>
+        <span className="pfx-unit">
+          <input required type="number" inputMode="decimal" min={0.01} step={0.01} value={lots} onChange={(e) => setLots(e.target.value)} />
+          <em aria-hidden>lot</em>
+        </span>
       </label>
       <label className="field">
         <span>Tanggal beli</span>
