@@ -1,4 +1,4 @@
-"""Portfolio endpoints: holdings, evaluation (full and quick) and stored history. Data per akun."""
+"""Portfolio endpoints: holdings, cash, evaluation (full and quick), mix and stored history. Data per akun."""
 from __future__ import annotations
 
 import math
@@ -6,12 +6,13 @@ from contextlib import contextmanager
 from datetime import date
 
 import numpy as np
+import pandas as pd
 import psycopg2
 from fastapi import APIRouter, Depends, HTTPException, Query
 from psycopg2 import errors as pg_errors
 from pydantic import BaseModel, Field
 
-from analytics.portfolio import LOT_SIZE, evaluate
+from analytics.portfolio import LOT_SIZE, cash_summary, evaluate
 from api.auth import clerk_display_name, current_clerk_id
 from api.main import Json, ttl_cache  # file ini di-include di akhir api/main.py, setelah Json terdefinisi
 from core import history as hist
@@ -22,6 +23,9 @@ from core.portfolio_data import load_macro_series, load_price_inputs
 router = APIRouter(prefix="/api/portfolio")
 _ready = False
 _user_ids: dict[str, int] = {}
+
+MIX_PREFIX = "mix:"
+MIX_MAX = 6
 
 SCHEMA_HINT = (
     "Skema tabel pengguna atau portofolio belum sesuai dengan kode. "
@@ -62,26 +66,63 @@ def current_user(clerk_id: str = Depends(current_clerk_id)) -> int:
     return user_id
 
 
-def _clean_name(name: str) -> str:
+def _is_mix(name: str) -> bool:
+    return name.startswith(MIX_PREFIX)
+
+
+def _mix_parts(name: str) -> list[str]:
+    parts = [p.strip() for p in name[len(MIX_PREFIX):].split(",")]
+    return sorted({p for p in parts if p})
+
+
+def _clean_name(name: str, *, write: bool = False) -> str:
+    """Portofolio gabungan (mix:A,B) hanya boleh dibaca. Nama biasa tidak boleh memuat koma saat ditulis."""
     name = name.strip()
+    if _is_mix(name):
+        if write:
+            raise HTTPException(422, "Portofolio gabungan bersifat baca saja. Ubah lewat portofolio aslinya.")
+        parts = _mix_parts(name)
+        if not 2 <= len(parts) <= MIX_MAX:
+            raise HTTPException(422, f"Gabungan memerlukan 2 sampai {MIX_MAX} portofolio.")
+        return MIX_PREFIX + ",".join(parts)
     if not name or len(name) > 60:
         raise HTTPException(422, "Nama portofolio harus 1 sampai 60 karakter.")
+    if write and "," in name:
+        raise HTTPException(422, "Nama portofolio tidak boleh memuat koma.")
     return name
 
 
+def _load(user_id: int, name: str):
+    """Posisi dan saldo cash. Untuk mix, seluruh posisi digabung dan cash dijumlahkan;
+    setiap posisi tetap membawa tanggal belinya sendiri."""
+    if not _is_mix(name):
+        return store.list_holdings(name, user_id=user_id), store.get_cash(name, user_id)
+    parts = _mix_parts(name)
+    known = set(store.list_portfolios(user_id))
+    absent = [p for p in parts if p not in known]
+    if absent:
+        raise ValueError("Portofolio tidak ditemukan: " + ", ".join(absent))
+    holdings = pd.concat([store.list_holdings(p, user_id=user_id) for p in parts], ignore_index=True)
+    return holdings, sum(store.get_cash(p, user_id) for p in parts)
+
+
 def _require_holdings(user_id: int, name: str):
-    holdings = store.list_holdings(name, user_id=user_id)
+    holdings, cash = _load(user_id, name)
     if holdings.empty:
+        if cash > 0:
+            raise ValueError(
+                f"Portofolio '{name}' baru berisi cash. Tambahkan saham untuk menghitung risiko dan Sharpe ratio."
+            )
         raise ValueError(f"Portofolio '{name}' kosong. Tambahkan posisi terlebih dahulu.")
-    return holdings
+    return holdings, cash
 
 
 @ttl_cache(300)
 def full_evaluation(user_id: int, name: str) -> dict:
-    holdings = _require_holdings(user_id, name)
+    holdings, cash = _require_holdings(user_id, name)
     tickers = sorted(holdings["ticker"].unique())
     prices, no_trade = load_price_inputs(tickers, holdings["buy_date"].min())
-    return evaluate(prices, holdings, load_macro_series("ID_RATE"), no_trade)
+    return evaluate(prices, holdings, load_macro_series("ID_RATE"), no_trade, cash=cash)
 
 
 def _verdict(low: float, high: float) -> str:
@@ -91,7 +132,7 @@ def _verdict(low: float, high: float) -> str:
 @ttl_cache(300)
 def quick_evaluation(user_id: int, name: str) -> dict:
     """Estimasi dari statistik universe, tanpa membaca harga. Logika sama dengan cmd_quick di portfolio_cli.py."""
-    holdings = _require_holdings(user_id, name)
+    holdings, cash = _require_holdings(user_id, name)
     tickers = sorted(holdings["ticker"].unique())
     as_of, stats = universe_store.read_stats(tickers)
     if as_of is None:
@@ -124,6 +165,7 @@ def quick_evaluation(user_id: int, name: str) -> dict:
     risk = weights * (cov @ weights) / variance
     count = len(tickers)
     avg_corr = (corr.to_numpy().sum() - count) / (count * (count - 1)) if count > 1 else None
+    annual_vol = math.sqrt(variance) * k
 
     return {
         "as_of": str(as_of), "window": None,
@@ -134,10 +176,11 @@ def quick_evaluation(user_id: int, name: str) -> dict:
             "since_buy": None, "equal_weight": None,
             "current_weights": {
                 "sharpe": per_week * k, "ci_low": low, "ci_high": high, "verdict": _verdict(low, high),
-                "annual_excess_return": mean_week * 52, "annual_vol": math.sqrt(variance) * k,
+                "annual_excess_return": mean_week * 52, "annual_vol": annual_vol,
                 "start": None, "end": None, "n_obs": n_obs, "basis": "mingguan",
             },
         },
+        **cash_summary(float(value.sum()), cash, annual_vol, mean_week * 52),
         "price_jumps": [], "illiquid_tickers": [], "warnings": [],
     }
 
@@ -153,23 +196,22 @@ class NewHolding(BaseModel):
     buy_date: date
 
 
+class CashBody(BaseModel):
+    amount: float = Field(ge=0, le=1e15)
+
+
 @router.get("")
 def portfolios(user: int = Depends(current_user)):
     with handled():
-        df = store.list_holdings(user_id=user)
-    if df.empty:
-        return Json([])
-    rows = [
-        {"name": n, "tickers": int(g["ticker"].nunique()), "positions": len(g), "firstBuy": g["buy_date"].min()}
-        for n, g in df.groupby("portfolio")
-    ]
+        rows = store.list_summaries(user)
     return Json(rows)
 
 
 @router.get("/{name}/holdings")
 def holdings(name: str, user: int = Depends(current_user)):
+    name = _clean_name(name)
     with handled():
-        df = store.list_holdings(_clean_name(name), user_id=user)
+        df, _ = _load(user, name)
     df = df.drop(columns=["user_id"]).assign(buy_date=df["buy_date"].dt.strftime("%Y-%m-%d"))
     return Json(df.to_dict("records"))
 
@@ -177,9 +219,17 @@ def holdings(name: str, user: int = Depends(current_user)):
 @router.post("/{name}/holdings")
 def add_holding(name: str, body: NewHolding, user: int = Depends(current_user)):
     with handled():
-        added = store.add_holdings(_clean_name(name), [(body.ticker, body.lots, body.buy_date.isoformat())], user)
+        added = store.add_holdings(_clean_name(name, write=True), [(body.ticker, body.lots, body.buy_date.isoformat())], user)
     _invalidate()
     return Json({"added": added})
+
+
+@router.put("/{name}/cash")
+def set_cash(name: str, body: CashBody, user: int = Depends(current_user)):
+    with handled():
+        store.set_cash(_clean_name(name, write=True), body.amount, user)
+    _invalidate()
+    return Json({"cash": body.amount})
 
 
 @router.delete("/holdings/{holding_id}")
@@ -215,7 +265,7 @@ def history(name: str, limit: int = Query(60, ge=1, le=500), user: int = Depends
 
 @router.post("/{name}/history")
 def save_snapshot(name: str, user: int = Depends(current_user)):
-    name = _clean_name(name)
+    name = _clean_name(name, write=True)
     with handled():
         result = full_evaluation(user, name)
         blocks = result["sharpe"]

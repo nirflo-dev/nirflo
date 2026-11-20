@@ -98,7 +98,40 @@ def _price_jumps(prices, since):
     return found
 
 
-def evaluate(prices, holdings, rf_annual_pct, no_trade_ratio=None):
+def cash_summary(stock_value, cash, stock_vol, stock_excess):
+    """Dampak cash pada portofolio.
+
+    Aturan: Sharpe hanya menilai bagian saham. Cash diasumsikan berimbal sebesar suku bunga
+    bebas risiko, sehingga excess return dan volatilitasnya nol dan Sharpe tidak berubah berapa
+    pun porsi cash-nya. Volatilitas dan excess return total adalah nilai bagian saham dikali
+    porsi saham terhadap total.
+    """
+    cash = max(0.0, float(cash or 0.0))
+    stock_value = float(stock_value)
+    total = stock_value + cash
+    cash_weight = cash / total if total > 0 else 0.0
+    share = 1.0 - cash_weight
+
+    def scaled(x):
+        return None if x is None else _num(x * share, 6)
+
+    return {
+        "cash": {
+            "amount": _num(cash, 2),
+            "weight": _num(cash_weight, 6),
+            "stock_value": _num(stock_value, 2),
+            "total_value": _num(total, 2),
+        },
+        "portfolio_risk": {
+            "stock_vol": _num(stock_vol, 6),
+            "total_vol": scaled(stock_vol),
+            "stock_excess_return": _num(stock_excess, 6),
+            "total_excess_return": scaled(stock_excess),
+        },
+    }
+
+
+def evaluate(prices, holdings, rf_annual_pct, no_trade_ratio=None, cash=0.0):
     tickers = sorted(holdings["ticker"].unique())
     missing = [t for t in tickers if t not in prices.columns]
     if missing:
@@ -167,6 +200,7 @@ def evaluate(prices, holdings, rf_annual_pct, no_trade_ratio=None):
             f"Data suku bunga terakhir {rf_age} hari lalu, nilai terakhir dipakai untuk periode setelahnya."
         )
 
+    current = _sharpe(weekly.mul(weights, axis=1).sum(axis=1), rf_weekly, WEEKS_PER_YEAR, "mingguan")
     matrix = [[_num(v, 4) for v in row] for row in corr.to_numpy().tolist()]
     return {
         "as_of": _date(as_of),
@@ -175,16 +209,18 @@ def evaluate(prices, holdings, rf_annual_pct, no_trade_ratio=None):
             "start": _date(weekly.index[0]),
             "end": _date(weekly.index[-1]),
         },
+        # Bobot dan kontribusi risiko dihitung dari bagian saham saja (jumlah = 100%).
         "weights": {t: _num(v, 6) for t, v in weights.items()},
         "risk_contribution": {t: _num(v, 6) for t, v in zip(tickers, risk)},
         "correlation": {"tickers": tickers, "matrix": matrix, "average": _num(avg_corr, 4)},
         "sharpe": {
             "since_buy": _sharpe(since_buy, rf_daily, TRADING_DAYS, "harian"),
-            "current_weights": _sharpe(
-                weekly.mul(weights, axis=1).sum(axis=1), rf_weekly, WEEKS_PER_YEAR, "mingguan"
-            ),
+            "current_weights": current,
             "equal_weight": _sharpe(weekly.mean(axis=1), rf_weekly, WEEKS_PER_YEAR, "mingguan"),
         },
+        **cash_summary(
+            value.sum(), cash, current["annual_vol"], current["annual_excess_return"]
+        ),
         "price_jumps": jumps,
         "illiquid_tickers": illiquid,
         "warnings": warnings,
