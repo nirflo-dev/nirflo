@@ -19,6 +19,7 @@ STEPS = {
     "portfolio": ["portfolio_cli.py", "evaluate-all"],
     "xbrl": ["data/r2/backup_xbrl.py"],
     "export": ["data/r2/export_db.py", "--upload"],
+    "macro": ["-m", "pipeline.update_macro"],
 }
 R2_STEPS = ("xbrl", "export")
 

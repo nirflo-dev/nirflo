@@ -26,6 +26,54 @@ DATE_FIELDS = ("day", "date", "released_at")
 VALUE_FIELDS = ("value", "close", "actual")
 
 LSE_MAP = {
+    'ID_BI_RATE': {
+        'kind': 'release', 'country': 'ID', 'names': ('Interest Rate Decision',),
+        'category': 'Interest_Rate',
+    },
+    'ID_BI_DEPOSIT_RATE': {
+        'kind': 'release', 'country': 'ID', 'names': ('Deposit Facility Rate',),
+        'category': 'Interest_Rate',
+    },
+    'ID_BI_LENDING_RATE': {
+        'kind': 'release', 'country': 'ID', 'names': ('Lending Facility Rate',),
+        'category': 'Interest_Rate',
+    },
+    'ID_LOAN_GROWTH_YOY': {
+        'kind': 'release', 'country': 'ID', 'names': ('Loan Growth YoY',),
+        'category': 'Credit',
+    },
+    'ID_M2_YOY': {
+        'kind': 'release', 'country': 'ID', 'names': ('M2 Money Supply YoY',),
+        'category': 'Monetary',
+    },
+    'ID_PMI_MANUFACTURING': {
+        'kind': 'release', 'country': 'ID', 'names': ('S&P Global Manufacturing PMI',),
+        'category': 'Business_Activity',
+    },
+    'ID_CONSUMER_CONFIDENCE': {
+        'kind': 'release', 'country': 'ID', 'names': ('Consumer Confidence',),
+        'category': 'Consumer',
+    },
+    'ID_RETAIL_SALES_YOY': {
+        'kind': 'release', 'country': 'ID', 'names': ('Retail Sales YoY',),
+        'category': 'Consumer',
+    },
+    'ID_CAR_SALES_YOY': {
+        'kind': 'release', 'country': 'ID', 'names': ('Car Sales YoY',),
+        'category': 'Consumer',
+    },
+    'ID_EXPORTS_YOY': {
+        'kind': 'release', 'country': 'ID', 'names': ('Exports YoY',),
+        'category': 'External_Balance',
+    },
+    'ID_IMPORTS_YOY': {
+        'kind': 'release', 'country': 'ID', 'names': ('Imports YoY',),
+        'category': 'External_Balance',
+    },
+    'ID_TRADE_BALANCE_M': {
+        'kind': 'release', 'country': 'ID', 'names': ('Balance of Trade',),
+        'category': 'External_Balance',
+    },
     'ID_POLICY_RATE': {
         'kind': 'observation', 'country': 'ID',
         'codes': ('ID.interest_rate',), 'categories': ('interest_rate',),
@@ -50,11 +98,6 @@ LSE_MAP = {
         'kind': 'observation', 'country': 'ID',
         'codes': ('ID.unemployment_rate',), 'categories': ('unemployment_rate',),
         'category': 'Labor',
-    },
-    'ID_PMI_MANUFACTURING': {
-        'kind': 'observation', 'country': 'ID',
-        'codes': ('ID.manufacturing_pmi',), 'categories': ('manufacturing_pmi',),
-        'category': 'Business_Activity',
     },
     'ID_10Y': {
         'kind': 'yield', 'country': 'ID',
@@ -94,7 +137,9 @@ def enabled():
 
 def rows_to_frame(payload):
     rows = payload
+    columns = None
     if isinstance(payload, dict):
+        columns = payload.get("columns")
         rows = next(
             (
                 payload[name]
@@ -106,7 +151,10 @@ def rows_to_frame(payload):
     if not isinstance(rows, list):
         keys = ", ".join(sorted(payload)) if isinstance(payload, dict) else type(payload).__name__
         raise LseError(200, "shape-unknown", "bentuk jawaban macro tidak dikenali: " + keys)
-    frame = pd.DataFrame(rows)
+    if rows and isinstance(rows[0], (list, tuple)) and columns:
+        frame = pd.DataFrame(rows, columns=columns)
+    else:
+        frame = pd.DataFrame(rows)
     if frame.empty:
         return pd.DataFrame(columns=["Date", "Value"])
     date_col = next((c for c in DATE_FIELDS if c in frame.columns), None)
@@ -288,6 +336,14 @@ def client():
     return LseClient()
 
 
+def _latest_first(items):
+    return sorted(
+        items,
+        key=lambda item: (item.get("last") or "", item.get("stored_records") or 0),
+        reverse=True,
+    )
+
+
 def resolve(ticker):
     spec = LSE_MAP.get(ticker)
     if spec is None or "kind" not in spec:
@@ -297,11 +353,17 @@ def resolve(ticker):
     for code in spec.get("codes", ()):
         if code in by_code:
             return by_code[code]
-    for category in spec.get("categories", ()):
-        found = [item for item in series if item.get("category") == category]
+    for name in spec.get("names", ()):
+        wanted = name.strip().lower()
+        exact = [i for i in series if str(i.get("name") or "").strip().lower() == wanted]
+        loose = [i for i in series if wanted in str(i.get("name") or "").lower()]
+        found = exact or loose
         if found:
-            found.sort(key=lambda item: (item.get("last") or "", item.get("stored_records") or 0), reverse=True)
-            return found[0]
+            return _latest_first(found)[0]
+    for category in spec.get("categories", ()):
+        found = [i for i in series if i.get("category") == category]
+        if found:
+            return _latest_first(found)[0]
     return None
 
 
@@ -416,15 +478,15 @@ def cmd_resolve(args):
     for ticker, spec in LSE_MAP.items():
         if "market" in spec:
             rows = client().pairs(spec["market"], symbol=spec["symbol"])
-            print(f"{ticker:<22} {spec['market']}/{spec['symbol']:<22} {'ada' if rows else 'TIDAK ADA'}")
+            print(f"{ticker:<24} {spec['market']}/{spec['symbol']:<22} {'ada' if rows else 'TIDAK ADA'}")
             continue
         found = resolve(ticker)
         if found is None:
-            print(f"{ticker:<22} TIDAK DITEMUKAN (kind={spec['kind']}, country={spec['country']})")
+            print(f"{ticker:<24} TIDAK DITEMUKAN (kind={spec['kind']}, country={spec['country']})")
         else:
             print(
-                f"{ticker:<22} {found['code']:<30} {found.get('frequency', '')} "
-                f"terakhir={found.get('last')} nilai={found.get('latest_value')}"
+                f"{ticker:<24} {str(found.get('code')):<34} {str(found.get('name'))[:34]:<34} "
+                f"{found.get('frequency', '')} terakhir={found.get('last')} nilai={found.get('latest_value')}"
             )
 
 
