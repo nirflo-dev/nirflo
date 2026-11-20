@@ -287,3 +287,98 @@
   .lp-area{opacity:1}
   .lp-reveal{opacity:1;transform:none}
 }
+
+/* === Animasi tambahan === */
+
+/* arah muncul saat di-scroll */
+.lp-reveal.left:not(.in){transform:translateX(-40px)}
+.lp-reveal.right:not(.in){transform:translateX(40px)}
+.lp-reveal.zoom:not(.in){transform:scale(.94) translateY(12px)}
+
+/* lapisan latar, paralaks, dan bola cahaya */
+.lp main,.lp-foot{position:relative;z-index:1}
+.lp-orbs{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none}
+.lp-orbs i{position:absolute;border-radius:50%;filter:blur(80px);animation:lpdrift 16s ease-in-out infinite}
+.lp-orbs .o1{top:6%;left:-8%;width:420px;height:420px;background:color-mix(in srgb,var(--accent) 24%,transparent);translate:0 calc(var(--sy,0) * -.10px)}
+.lp-orbs .o2{top:46%;right:-10%;width:480px;height:480px;background:color-mix(in srgb,var(--s5) 20%,transparent);translate:0 calc(var(--sy,0) * -.18px);animation-duration:20s;animation-delay:-6s}
+.lp-orbs .o3{bottom:-12%;left:30%;width:380px;height:380px;background:color-mix(in srgb,var(--s6) 14%,transparent);translate:0 calc(var(--sy,0) * -.06px);animation-duration:24s;animation-delay:-12s}
+@keyframes lpdrift{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(48px,34px) scale(1.12)}}
+.lp-hero::before{translate:0 calc(var(--sy,0) * .18px)}
+.lp-demo{translate:0 calc(var(--sy,0) * -.05px)}
+.lp-hero .lp-wrap>div:first-child{opacity:calc(1 - var(--sy,0) / 800);translate:0 calc(var(--sy,0) * .08px)}
+
+/* navigasi saat di-scroll */
+.lp-nav .lp-wrap{transition:height .25s ease}
+.lp-nav.scrolled .lp-wrap{height:56px}
+.lp-nav.scrolled{border-bottom-color:var(--border);background:color-mix(in srgb,var(--bg) 88%,transparent)}
+
+/* titik navigasi bagian */
+.lp-dots{position:fixed;right:18px;top:50%;z-index:25;display:grid;gap:14px;translate:0 -50%}
+.lp-dots a{position:relative;display:block;width:10px;height:10px;border-radius:50%;background:color-mix(in srgb,var(--text) 22%,transparent);transition:background .25s,transform .25s,box-shadow .25s}
+.lp-dots a span{position:absolute;right:22px;top:50%;translate:6px -50%;padding:4px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);font-size:12px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .2s,translate .2s}
+.lp-dots a:hover span{opacity:1;translate:0 -50%}
+.lp-dots a:hover{background:var(--text)}
+.lp-dots a.on{background:var(--accent);transform:scale(1.5);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 22%,transparent)}
+@media(max-width:1180px){.lp-dots{display:none}}
+
+/* tombol kembali ke atas */
+.lp .lp-top{position:fixed;right:22px;bottom:22px;z-index:30;display:grid;place-items:center;width:46px;height:46px;padding:0;border:1px solid var(--border);border-radius:14px;background:var(--surface);color:var(--text);cursor:pointer;opacity:0;translate:0 14px;pointer-events:none;transition:opacity .3s,translate .3s,border-color .15s}
+.lp .lp-top.show{opacity:1;translate:0;pointer-events:auto}
+.lp .lp-top:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--border))}
+.lp-top svg{rotate:-90deg;transition:translate .2s}
+.lp-top:hover svg{translate:0 -3px}
+
+/* pita kata kunci */
+.lp-marquee{position:relative;overflow:hidden;padding:18px 0;border-block:1px solid color-mix(in srgb,var(--border) 70%,transparent);-webkit-mask-image:linear-gradient(90deg,transparent,#000 12%,#000 88%,transparent);mask-image:linear-gradient(90deg,transparent,#000 12%,#000 88%,transparent)}
+.lp-marquee-track{display:flex;width:max-content;animation:lpmarquee 38s linear infinite}
+.lp-marquee:hover .lp-marquee-track{animation-play-state:paused}
+.lp-marquee span{display:inline-flex;align-items:center;gap:12px;padding-right:44px;font-size:14px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;color:var(--muted)}
+.lp-marquee span i{width:6px;height:6px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--s5))}
+@keyframes lpmarquee{to{transform:translateX(-50%)}}
+
+/* judul bagian: kata demi kata */
+.lp-w{display:inline-block;overflow:hidden;vertical-align:top;padding-bottom:.12em;margin-bottom:-.12em}
+.lp-w>span{display:inline-block;transform:translateY(115%);transition:transform .8s cubic-bezier(.2,.7,.2,1);transition-delay:calc(var(--i,0) * 55ms + 120ms)}
+.lp-sec-head.in .lp-w>span{transform:none}
+.lp-sec-head .lp-kicker{display:inline-flex;align-items:center;gap:10px;opacity:0;transition:opacity .6s}
+.lp-sec-head .lp-kicker::before{content:"";width:0;height:2px;border-radius:2px;background:linear-gradient(90deg,var(--accent),var(--s5));transition:width .7s cubic-bezier(.2,.7,.2,1) .1s}
+.lp-sec-head.in .lp-kicker{opacity:1}
+.lp-sec-head.in .lp-kicker::before{width:28px}
+.lp-sec-head>p{opacity:0;translate:0 12px;transition:opacity .7s .5s,translate .7s .5s}
+.lp-sec-head.in>p{opacity:1;translate:0}
+
+/* kartu: miring 3D mengikuti kursor */
+.lp .lp-card{transition:border-color .2s,transform .12s ease-out,box-shadow .2s}
+.lp .lp-card:hover{transform:perspective(900px) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg)) translateY(-3px)}
+
+/* langkah: garis atas terisi bergantian dan nomor memantul */
+.lp-steps .lp-card::after{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,var(--accent),var(--s5));transform:scaleX(0);transform-origin:left;transition:transform .9s cubic-bezier(.4,0,.2,1) calc(var(--d,0ms) + 250ms)}
+.lp-steps.in .lp-card::after{transform:scaleX(1)}
+.lp-stepno{transform:scale(0);transition:transform .5s cubic-bezier(.3,1.6,.5,1) var(--d,0ms)}
+.lp-steps.in .lp-stepno{transform:none}
+
+/* tombol: sedikit tertarik ke kursor */
+.lp .lp-btn{transform:translate(var(--tx,0px),var(--ty,0px))}
+.lp .lp-btn:hover{transform:translate(var(--tx,0px),calc(var(--ty,0px) - 1px))}
+
+/* daftar poin fitur masuk berurutan */
+.lp-feat-copy .lp-checks li{animation:lpup .5s cubic-bezier(.2,.7,.2,1) backwards;animation-delay:calc(var(--i,0) * 80ms + 150ms)}
+
+/* penutup: logo melayang dengan cincin gelombang */
+.lp-final-logo{position:relative;display:grid;place-items:center;width:56px;height:56px;animation:lpfloat 4.5s ease-in-out infinite}
+.lp-final-logo i{position:absolute;inset:0;border:2px solid color-mix(in srgb,var(--accent) 60%,transparent);border-radius:18px;animation:lpring 3s cubic-bezier(.2,.6,.3,1) infinite}
+.lp-final-logo i:nth-child(2){animation-delay:1.5s}
+@keyframes lpfloat{50%{transform:translateY(-8px)}}
+@keyframes lpring{from{opacity:.7;transform:scale(1)}to{opacity:0;transform:scale(2.4)}}
+
+/* kurangi gerakan */
+@media(prefers-reduced-motion:reduce){
+  .lp-orbs i,.lp-hero::before,.lp-demo,.lp-hero .lp-wrap>div:first-child{translate:none!important}
+  .lp-hero .lp-wrap>div:first-child{opacity:1!important}
+  .lp-w>span{transform:none}
+  .lp-sec-head .lp-kicker,.lp-sec-head>p{opacity:1;translate:none}
+  .lp-sec-head .lp-kicker::before{width:28px}
+  .lp-steps .lp-card::after,.lp-stepno{transform:none}
+  .lp-reveal.left:not(.in),.lp-reveal.right:not(.in),.lp-reveal.zoom:not(.in){transform:none}
+  .lp-marquee-track{width:auto;flex-wrap:wrap}
+}

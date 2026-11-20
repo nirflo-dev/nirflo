@@ -19,6 +19,14 @@ const NAV = [
   ["faq", "FAQ"],
 ] as const;
 const SECTION_IDS = ["coba", "prinsip", "fitur", "mulai", "terbuka", "faq"] as const;
+const DOTS = [
+  ["coba", "Coba sendiri"],
+  ["prinsip", "Prinsip"],
+  ["fitur", "Fitur"],
+  ["mulai", "Cara mulai"],
+  ["terbuka", "Terbuka"],
+  ["faq", "FAQ"],
+] as const;
 
 const f1 = (v: number) => v.toLocaleString("id-ID", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const f2 = (v: number) => v.toLocaleString("id-ID", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -68,16 +76,31 @@ function useInView<T extends HTMLElement>(threshold = 0.2) {
 
 function useScrollUi(ids: readonly string[]) {
   const [active, setActive] = useState("");
+  const [scrolled, setScrolled] = useState(false);
+  const [showTop, setShowTop] = useState(false);
   const bar = useRef<HTMLDivElement>(null);
+  const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const onScroll = () => {
+    let raf = 0;
+    const update = () => {
+      raf = 0;
       const h = document.documentElement;
-      const p = h.scrollTop / Math.max(1, h.scrollHeight - h.clientHeight);
+      const y = h.scrollTop;
+      const p = y / Math.max(1, h.scrollHeight - h.clientHeight);
       bar.current?.style.setProperty("--p", String(Math.min(1, Math.max(0, p))));
+      root.current?.style.setProperty("--sy", String(Math.min(y, 1600)));
+      setScrolled(y > 8);
+      setShowTop(y > 700);
     };
-    onScroll();
+    const onScroll = () => {
+      if (!raf) raf = requestAnimationFrame(update);
+    };
+    update();
     window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
   }, []);
   useEffect(() => {
     const io = new IntersectionObserver((entries) => {
@@ -89,20 +112,85 @@ function useScrollUi(ids: readonly string[]) {
     }
     return () => io.disconnect();
   }, [ids]);
-  return { active, bar };
+  return { active, scrolled, showTop, bar, root };
 }
 
-function Reveal({ children, delayMs = 0 }: { children: ReactNode; delayMs?: number }) {
+function useTween(target: number, ms = 380) {
+  const reduced = useReduced();
+  const [value, setValue] = useState(target);
+  const from = useRef(target);
+  useEffect(() => {
+    if (reduced) {
+      from.current = target;
+      setValue(target);
+      return;
+    }
+    const start = from.current;
+    const t0 = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const k = Math.min(1, (now - t0) / ms);
+      const eased = 1 - Math.pow(1 - k, 3);
+      const cur = start + (target - start) * eased;
+      from.current = cur;
+      setValue(cur);
+      if (k < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, ms, reduced]);
+  return value;
+}
+
+type RevealKind = "up" | "left" | "right" | "zoom";
+
+function Reveal({ children, delayMs = 0, kind = "up" }: { children: ReactNode; delayMs?: number; kind?: RevealKind }) {
   const [ref, seen] = useInView<HTMLDivElement>(0.16);
-  return <div ref={ref} className={`lp-reveal${seen ? " in" : ""}`} style={delay(delayMs)}>{children}</div>;
+  return (
+    <div ref={ref} className={`lp-reveal ${kind}${seen ? " in" : ""}`} style={delay(delayMs)}>
+      {children}
+    </div>
+  );
 }
 
 const spot = (e: ReactPointerEvent<HTMLElement>) => {
   const card = (e.target as HTMLElement).closest<HTMLElement>(".lp-card");
   if (!card) return;
   const r = card.getBoundingClientRect();
+  const px = (e.clientX - r.left) / r.width;
+  const py = (e.clientY - r.top) / r.height;
   card.style.setProperty("--x", `${e.clientX - r.left}px`);
   card.style.setProperty("--y", `${e.clientY - r.top}px`);
+  card.style.setProperty("--rx", `${((0.5 - py) * 5).toFixed(2)}deg`);
+  card.style.setProperty("--ry", `${((px - 0.5) * 7).toFixed(2)}deg`);
+};
+
+const spotReset = (e: ReactPointerEvent<HTMLElement>) => {
+  e.currentTarget.querySelectorAll<HTMLElement>(".lp-card").forEach((c) => {
+    c.style.setProperty("--rx", "0deg");
+    c.style.setProperty("--ry", "0deg");
+  });
+};
+
+const magnet = (e: ReactPointerEvent<HTMLElement>) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>(".lp-btn");
+  e.currentTarget.querySelectorAll<HTMLElement>(".lp-btn").forEach((x) => {
+    if (x !== b) {
+      x.style.setProperty("--tx", "0px");
+      x.style.setProperty("--ty", "0px");
+    }
+  });
+  if (!b) return;
+  const r = b.getBoundingClientRect();
+  b.style.setProperty("--tx", `${(((e.clientX - r.left) / r.width - 0.5) * 8).toFixed(1)}px`);
+  b.style.setProperty("--ty", `${(((e.clientY - r.top) / r.height - 0.5) * 6).toFixed(1)}px`);
+};
+
+const magnetReset = (e: ReactPointerEvent<HTMLElement>) => {
+  e.currentTarget.querySelectorAll<HTMLElement>(".lp-btn").forEach((b) => {
+    b.style.setProperty("--tx", "0px");
+    b.style.setProperty("--ty", "0px");
+  });
 };
 
 /* ---------- komponen kecil ---------- */
@@ -448,7 +536,7 @@ function DemoCard() {
   );
 }
 
-const AUDIENCES = ["Pemula", "Pelajar", "Pekerja", "Karyawan", "Investor", "Mahasiswa", "Pengusaha"] as const;
+const AUDIENCES = ["pemula", "pelajar", "pekerja", "karyawan", "investor", "mahasiswa", "pengusaha"] as const;
 
 function Audience() {
   const reduced = useReduced();
@@ -491,6 +579,22 @@ function Audience() {
   );
 }
 
+const MARQUEE = [
+  "Kontribusi risiko", "Korelasi antar saham", "Sharpe ratio", "Selang kepercayaan", "Sinyal kuantitatif",
+  "IHSG", "Kurs rupiah", "Komoditas", "Suku bunga", "Diversifikasi",
+] as const;
+
+function Marquee() {
+  const items = [...MARQUEE, ...MARQUEE];
+  return (
+    <div className="lp-marquee" aria-hidden>
+      <div className="lp-marquee-track">
+        {items.map((t, i) => <span key={i}><i />{t}</span>)}
+      </div>
+    </div>
+  );
+}
+
 /* ---------- simulator ---------- */
 
 const SIM = [
@@ -519,6 +623,8 @@ function Simulator() {
   const [a, setA] = useState(55);
   const [rho, setRho] = useState(40);
   const r = useMemo(() => simulate(a / 100, rho / 100), [a, rho]);
+  const sd = useTween(r.sd * 100);
+  const saving = useTween(r.saving * 100);
   const top = r.rc.reduce((best, v, i) => (v - r.w[i] > r.rc[best] - r.w[best] ? i : best), 0);
   const gap = r.rc[top] - r.w[top];
   const insight = gap >= 0.05
@@ -557,8 +663,8 @@ function Simulator() {
           ))}
         </ul>
         <div className="lp-stats">
-          <div><small>Volatilitas portofolio</small><strong>{f1(r.sd * 100)}%</strong><span>per tahun</span></div>
-          <div><small>Dihemat diversifikasi</small><strong>{f1(r.saving * 100)}%</strong><span>dibanding saham yang kompak</span></div>
+          <div><small>Volatilitas portofolio</small><strong>{f1(sd)}%</strong><span>per tahun</span></div>
+          <div><small>Dihemat diversifikasi</small><strong>{f1(saving)}%</strong><span>dibanding saham yang kompak</span></div>
         </div>
         <p className="lp-note" aria-live="polite">{insight} {diversify}</p>
         <p className="lp-fine">Simulasi sederhana dengan volatilitas contoh 35%, 22%, dan 14% per tahun. Angka bersifat ilustrasi.</p>
@@ -594,7 +700,7 @@ const PRINCIPLES: readonly Principle[] = [
     icon: "search",
     title: "Transparan dan dibangun bersama",
     body: "Cara hitung, asumsi, dan batasan data ditampilkan apa adanya. Kode sumbernya terbuka di GitHub dengan lisensi MIT, sehingga siapa pun dapat memeriksa, mengusulkan perbaikan, atau menambahkan alat baru.",
-    gain: "Anda tidak perlu percaya begitu saja, Anda bisa memeriksanya sendiri.",
+    gain: "Anda tidak perlu percaya begitu saja; Anda bisa memeriksanya sendiri.",
   },
 ];
 
@@ -640,7 +746,9 @@ function Features() {
         <div className="lp-feat-copy">
           <h3>{f.label}</h3>
           <p>{f.lead}</p>
-          <ul className="lp-checks">{f.points.map((p) => <li key={p}>{p}</li>)}</ul>
+          <ul className="lp-checks">
+            {f.points.map((p, i) => <li key={p} style={{ "--i": i } as CSSProperties}>{p}</li>)}
+          </ul>
           <Link to={LOGIN} className="lp-more">Coba di aplikasi <Icon name="arrow" size={16} /></Link>
         </div>
         <div className="lp-feat-viz">{seen && <FeatureVisual id={id} />}</div>
@@ -654,6 +762,23 @@ const STEPS = [
   ["Isi posisi", "Masukkan kode saham, jumlah lot, dan tanggal beli."],
   ["Baca hasilnya", "Lihat risiko, korelasi, dan Sharpe ratio beserta penjelasannya."],
 ] as const;
+
+function Steps() {
+  const [ref, seen] = useInView<HTMLDivElement>(0.3);
+  return (
+    <div ref={ref} className={`lp-steps${seen ? " in" : ""}`} role="list" onPointerMove={spot} onPointerLeave={spotReset}>
+      {STEPS.map(([t, b], i) => (
+        <Reveal key={t} kind="zoom" delayMs={i * 160}>
+          <div className="lp-card" role="listitem">
+            <span className="lp-stepno" style={delay(300 + i * 160)}>{i + 1}</span>
+            <h3>{t}</h3>
+            <p>{b}</p>
+          </div>
+        </Reveal>
+      ))}
+    </div>
+  );
+}
 
 const TRANSPARENCY = [
   "Selang kepercayaan 95% ditampilkan, bukan satu angka tunggal.",
@@ -694,14 +819,21 @@ function Faq() {
 }
 
 function Head({ kicker, title, children }: { kicker: string; title: string; children?: ReactNode }) {
+  const [ref, seen] = useInView<HTMLDivElement>(0.3);
+  const words = title.split(" ");
   return (
-    <Reveal>
-      <div className="lp-sec-head">
-        <span className="lp-kicker">{kicker}</span>
-        <h2>{title}</h2>
-        {children && <p>{children}</p>}
-      </div>
-    </Reveal>
+    <div ref={ref} className={`lp-sec-head${seen ? " in" : ""}`}>
+      <span className="lp-kicker">{kicker}</span>
+      <h2>
+        <span className="lp-sr">{title}</span>
+        {words.map((w, i) => (
+          <span key={i} aria-hidden>
+            <span className="lp-w" style={{ "--i": i } as CSSProperties}><span>{w}</span></span>{" "}
+          </span>
+        ))}
+      </h2>
+      {children && <p>{children}</p>}
+    </div>
   );
 }
 
@@ -711,7 +843,7 @@ export default function LandingPage() {
   useEffect(() => {
     document.title = TITLE;
   }, []);
-  const { active, bar } = useScrollUi(SECTION_IDS);
+  const { active, scrolled, showTop, bar, root } = useScrollUi(SECTION_IDS);
 
   const onHeroMove = (e: ReactPointerEvent<HTMLElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -720,10 +852,16 @@ export default function LandingPage() {
   };
 
   return (
-    <div className="lp">
+    <div className="lp" ref={root}>
       <div className="lp-progress" ref={bar} aria-hidden />
+      <div className="lp-orbs" aria-hidden><i className="o1" /><i className="o2" /><i className="o3" /></div>
+      <nav className="lp-dots" aria-label="Navigasi bagian">
+        {DOTS.map(([id, label]) => (
+          <a key={id} href={`#${id}`} className={active === id ? "on" : ""} aria-label={label}><span>{label}</span></a>
+        ))}
+      </nav>
 
-      <header className="lp-nav">
+      <header className={`lp-nav${scrolled ? " scrolled" : ""}`}>
         <div className="lp-wrap">
           <Link to="/" className="lp-brand" aria-label="Nirflo"><Logo size={32} /><span>Nirflo</span></Link>
           <nav className="lp-links" aria-label="Bagian halaman">
@@ -747,7 +885,7 @@ export default function LandingPage() {
                 Nirflo membawa analisis kuantitatif yang biasanya hanya ada di meja riset institusi kepada setiap
                 investor Indonesia: risiko portofolio, sinyal statistik, dan konteks makro dalam satu terminal.
               </p>
-              <div className="lp-cta lp-in" style={delay(400)}>
+              <div className="lp-cta lp-in" style={delay(400)} onPointerMove={magnet} onPointerLeave={magnetReset}>
                 <Link to={LOGIN} className="lp-btn primary lg">Mulai sekarang <Icon name="arrow" size={18} /></Link>
                 <a href="#coba" className="lp-btn lg">Coba simulasinya</a>
                 <a href={REPO} className="lp-btn lg gh" target="_blank" rel="noopener noreferrer"><GitHubMark size={18} />GitHub</a>
@@ -757,6 +895,8 @@ export default function LandingPage() {
             <DemoCard />
           </div>
         </section>
+
+        <Marquee />
 
         <section id="coba" className="lp-sec">
           <div className="lp-wrap">
@@ -773,9 +913,9 @@ export default function LandingPage() {
             <Head kicker="Prinsip" title="Empat prinsip yang menjaga Nirflo tetap berpihak pada Anda">
               Cara kami membangunnya, dalam bahasa yang sederhana.
             </Head>
-            <div className="lp-grid two" onPointerMove={spot}>
+            <div className="lp-grid two" onPointerMove={spot} onPointerLeave={spotReset}>
               {PRINCIPLES.map((p, i) => (
-                <Reveal key={p.title} delayMs={i * 90}>
+                <Reveal key={p.title} delayMs={i * 90} kind={i % 2 === 0 ? "left" : "right"}>
                   <article className="lp-card">
                     <div className="lp-card-top">
                       <span className="lp-ico"><Icon name={p.icon} size={20} /></span>
@@ -796,30 +936,20 @@ export default function LandingPage() {
             <Head kicker="Fitur" title="Satu terminal untuk seluruh alur riset Anda">
               Dari gambaran makro, ke satu saham, hingga risiko seluruh portofolio.
             </Head>
-            <Reveal><Features /></Reveal>
+            <Reveal kind="zoom"><Features /></Reveal>
           </div>
         </section>
 
         <section id="mulai" className="lp-sec">
           <div className="lp-wrap">
             <Head kicker="Cara mulai" title="Mulai dalam tiga langkah">Tidak perlu persiapan khusus.</Head>
-            <div className="lp-steps" role="list" onPointerMove={spot}>
-              {STEPS.map(([t, b], i) => (
-                <Reveal key={t} delayMs={i * 110}>
-                  <div className="lp-card" role="listitem">
-                    <span className="lp-stepno">{i + 1}</span>
-                    <h3>{t}</h3>
-                    <p>{b}</p>
-                  </div>
-                </Reveal>
-              ))}
-            </div>
+            <Steps />
           </div>
         </section>
 
         <section id="terbuka" className="lp-sec">
           <div className="lp-wrap">
-            <Reveal>
+            <Reveal kind="zoom">
               <div className="lp-open">
                 <div>
                   <span className="lp-kicker">Transparan dan terbuka</span>
@@ -858,9 +988,9 @@ export default function LandingPage() {
 
         <section className="lp-final">
           <div className="lp-wrap">
-            <Reveal>
+            <Reveal kind="zoom">
               <div className="lp-final-in">
-                <Logo size={56} />
+                <span className="lp-final-logo"><i /><i /><Logo size={56} /></span>
                 <h2>Mulai membaca risiko portofolio Anda</h2>
                 <p>Masuk dan tambahkan posisi pertama. Hasilnya langsung terlihat.</p>
                 <Link to={LOGIN} className="lp-btn primary lg">Masuk ke Nirflo <Icon name="arrow" size={18} /></Link>
@@ -887,6 +1017,13 @@ export default function LandingPage() {
           <small>&copy; {new Date().getFullYear()} Nirflo</small>
         </div>
       </footer>
+
+      <button
+        type="button" className={`lp-top${showTop ? " show" : ""}`} aria-label="Kembali ke atas"
+        onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+      >
+        <Icon name="arrow" size={18} />
+      </button>
     </div>
   );
 }
