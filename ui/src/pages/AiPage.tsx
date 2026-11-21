@@ -4,8 +4,10 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ApiError } from "../lib/api";
-import { AI_STATUS_KEY, askAi, useAiModels, useAiStatus, type AiModel, type ChatMessage } from "../lib/ai";
+import { api, ApiError } from "../lib/api";
+import { AI_STATUS_KEY, useAiModels, useAiStatus, type AiModel, type ChatMessage } from "../lib/ai";
+import { ago, useContextItems } from "../lib/aiContext";
+import { useAiScope } from "../lib/aiScope";
 import { store } from "../lib/hooks";
 import { OpenRouterConnect } from "../components/OpenRouterConnect";
 import "../ai.css";
@@ -25,6 +27,42 @@ const STARTERS = [
   "Apa arti z-score pada sinyal pertumbuhan laba?",
   "Bagaimana cara membaca kontribusi risiko di sebuah portofolio?",
 ];
+
+type ChatReply = { content: string; model?: string; scope?: "on" | "off"; used?: string[] };
+type CtxPayload = { id: string; kind: string; label: string; data: unknown };
+
+// Pengiriman memakai api() langsung agar snapshot halaman ikut terkirim.
+const chat = (body: { model: string; messages: ChatMessage[]; context: CtxPayload[]; signal: AbortSignal }) =>
+  api<ChatReply>("/ai/chat", undefined, {
+    method: "POST", headers: { "Content-Type": "application/json" }, signal: body.signal,
+    body: JSON.stringify({ model: body.model, messages: body.messages, context: body.context }),
+  });
+
+// Efek cahaya mengikuti pointer pada permukaan kaca.
+const light = (e: PointerEvent<HTMLElement>) => {
+  const r = e.currentTarget.getBoundingClientRect();
+  e.currentTarget.style.setProperty("--px", `${e.clientX - r.left}px`);
+  e.currentTarget.style.setProperty("--py", `${e.clientY - r.top}px`);
+};
+
+/**
+ * Membuka Profil > Koneksi AI, tempat saklar akses data berada.
+ * Memakai tombol akun Clerk yang sudah ada (nama class Clerk: cl-userButtonTrigger dll), sehingga halaman khusus
+ * "Koneksi AI" ikut muncul. Bila struktur Clerk berubah, tombol tidak melakukan apa-apa.
+ */
+async function find(selector: string, text?: string, tries = 20): Promise<HTMLElement | null> {
+  for (let i = 0; i < tries; i++) {
+    const hit = [...document.querySelectorAll<HTMLElement>(selector)].find((el) => !text || el.textContent?.includes(text));
+    if (hit) return hit;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return null;
+}
+async function openAiSettings() {
+  (await find(".cl-userButtonTrigger", undefined, 3))?.click();
+  (await find(".cl-userButtonPopoverActionButton__manageAccount"))?.click();
+  (await find(".cl-navbarButton", "Koneksi AI"))?.click();
+}
 
 // Jawaban AI dirender sebagai markdown (judul, daftar, tabel, kode). HTML mentah tidak dirender, jadi aman.
 const MD_COMPONENTS: Components = {
@@ -69,10 +107,7 @@ export default function AiPage() {
 
   return (
     <div className="ai-page">
-      <header>
-        <h2>Asisten AI</h2>
-        <p className="ai-muted">Opsional. Hubungkan akun OpenRouter-mu untuk berdiskusi dengan model AI pilihanmu.</p>
-      </header>
+      <h2 className="ai-sr">Asisten AI</h2>
 
       {flash?.kind === "ok" && <div className="ai-notice ok" role="status">OpenRouter berhasil tersambung.</div>}
       {flash?.kind === "err" && (
@@ -199,6 +234,51 @@ function ModelPicker({ value, models, loading, onChange }: {
   );
 }
 
+function ContextPicker({ skip, setSkip }: { skip: string[]; setSkip: (v: string[]) => void }) {
+  const items = useContextItems();
+  const scope = useAiScope().data?.scope ?? "off";
+  const [show, setShow] = useState(false);
+  const locked = (k: string) => scope === "off" || (k === "portfolio" && scope !== "portfolio");
+  const active = items.filter((i) => !locked(i.kind) && !skip.includes(i.id));
+  const toggle = (id: string) => setSkip(skip.includes(id) ? skip.filter((x) => x !== id) : [...skip, id]);
+  const pretty = useMemo(() => JSON.stringify(active.map(({ label, data }) => ({ label, data })), null, 2), [active]);
+
+  if (!items.length) {
+    return <p className="ai-muted ai-ctx-empty">Belum ada konteks. Buka Portofolio, Makro, atau Emiten lebih dulu untuk melampirkan hasilnya.</p>;
+  }
+  return (
+    <div className="ai-ctx">
+      <div className="ai-ctx-row">
+        <span className="ai-ctx-title">Konteks</span>
+        <div className="ai-ctx-chips">
+          {items.map((i) => {
+            const lock = locked(i.kind);
+            const on = !lock && !skip.includes(i.id);
+            return (
+              <button
+                key={i.id} type="button" aria-pressed={on} disabled={lock}
+                className={`ai-ctx-chip${on ? " on" : ""}`}
+                title={lock ? (scope === "off" ? "Akses data dimatikan" : "Akses data portofolio dimatikan") : `Diperbarui ${ago(i.at)}`}
+                onClick={() => toggle(i.id)}
+              >
+                {i.label}
+              </button>
+            );
+          })}
+        </div>
+        {scope === "off"
+          ? <button type="button" className="ai-link" onClick={() => void openAiSettings()}>Nyalakan akses</button>
+          : active.length > 0 && (
+            <button type="button" className="ai-link" aria-expanded={show} onClick={() => setShow((v) => !v)}>
+              {show ? "Tutup" : "Lihat"}
+            </button>
+          )}
+      </div>
+      {show && active.length > 0 && <div className="ai-preview" role="region" aria-label="Data yang dikirim ke AI"><pre>{pretty}</pre></div>}
+    </div>
+  );
+}
+
 function AiChat() {
   const qc = useQueryClient();
   const models = useAiModels();
@@ -207,6 +287,10 @@ function AiChat() {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [skip, setSkip] = useState<string[]>([]);
+  const [used, setUsed] = useState<Record<number, string[]>>({});
+  const items = useContextItems();
+  const scope = useAiScope().data?.scope ?? "off";
   const abort = useRef<AbortController | null>(null);
   const end = useRef<HTMLDivElement>(null);
 
@@ -226,8 +310,12 @@ function AiChat() {
     const ac = new AbortController();
     abort.current = ac;
     try {
-      const res = await askAi({ model, messages: next.slice(-HISTORY_LIMIT), signal: ac.signal });
+      const context = items
+        .filter((i) => scope !== "off" && (i.kind !== "portfolio" || scope === "portfolio") && !skip.includes(i.id))
+        .map(({ id, kind, label, data }) => ({ id, kind, label, data }));
+      const res = await chat({ model, messages: next.slice(-HISTORY_LIMIT), context, signal: ac.signal });
       setMessages([...next, { role: "assistant", content: res.content || "(Model tidak mengembalikan jawaban.)" }]);
+      if (res.used?.length) setUsed((u) => ({ ...u, [next.length]: res.used as string[] }));
     } catch (e) {
       if (ac.signal.aborted) return;
       setError(e instanceof Error ? e.message : "Permintaan gagal.");
@@ -247,22 +335,32 @@ function AiChat() {
   const ready = model !== "";
 
   return (
-    <section className="ai-card" aria-label="Obrolan AI">
+    <section className="ai-card" aria-label="Obrolan AI" onPointerMove={light}>
       <header className="ai-head">
-        <div>
-          <h2>Obrolan</h2>
-          <p className="ai-muted">AI tidak punya akses ke data atau hitungan di Nirflo.</p>
+        <div className="ai-title">
+          <div className="ai-title-row">
+            <h2>Obrolan</h2>
+            {messages.length > 0 && (
+              <button type="button" className="ai-new" onClick={() => { setMessages([]); setUsed({}); setError(null); }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                Obrolan baru
+              </button>
+            )}
+          </div>
+          <p className="ai-muted">
+            {scope === "off" ? "AI tidak punya akses ke data atau hitungan di Nirflo." : "AI hanya melihat ringkasan yang kamu lampirkan."}
+          </p>
         </div>
-        {messages.length > 0 && (
-          <button type="button" className="ai-btn ghost" onClick={() => { setMessages([]); setError(null); }}>Obrolan baru</button>
-        )}
+        <div className="ai-tools">
+          <div className="ai-model" aria-label="Model">
+            <ModelPicker value={model} models={models.data ?? []} loading={models.isPending} onChange={pickModel} />
+          </div>
+          <button type="button" className="ai-btn ghost" onClick={() => void openAiSettings()} title="Profil, lalu Koneksi AI">Akses data</button>
+        </div>
       </header>
-
-      <div className="ai-field">
-        <span>Model</span>
-        <ModelPicker value={model} models={models.data ?? []} loading={models.isPending} onChange={pickModel} />
-        {models.isError && <small className="ai-muted">Daftar model tidak dapat dimuat.</small>}
-      </div>
+      {models.isError && <small className="ai-muted">Daftar model tidak dapat dimuat.</small>}
 
       <div className="ai-log" role="log" aria-live="polite">
         {messages.length === 0 && (
@@ -277,7 +375,12 @@ function AiChat() {
         )}
         {messages.map((m, i) => (
           <div key={i} className={`ai-msg ${m.role}`}>
-            {m.role === "assistant" ? <Reply text={m.content} /> : m.content}
+            {m.role === "assistant" ? (
+              <>
+                {used[i] && <span className="ai-used" title={used[i].join(", ")}>Memakai data: {used[i].join(", ")}</span>}
+                <Reply text={m.content} />
+              </>
+            ) : m.content}
           </div>
         ))}
         {busy && <div className="ai-msg assistant pending" aria-label="Sedang menjawab"><i /><i /><i /></div>}
@@ -285,6 +388,8 @@ function AiChat() {
       </div>
 
       {error && <div className="ai-notice err" role="alert">{error}</div>}
+
+      <ContextPicker skip={skip} setSkip={setSkip} />
 
       <div className="ai-compose">
         <textarea

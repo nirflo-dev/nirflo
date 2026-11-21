@@ -9,6 +9,8 @@ import { Logo } from "./components/Logo";
 import { OpenRouterConnect } from "./components/OpenRouterConnect";
 import { TickerSearch } from "./components/TickerSearch";
 import { Empty, ErrorBoundary, ErrorState, Loading } from "./components/ui";
+import { AiAccessToggle } from "./components/AiAccess";
+import { clearContext } from "./lib/aiContext";
 
 const HomePage = lazy(() => import("./pages/HomePage"));
 const EmitenPage = lazy(() => import("./pages/EmitenPage"));
@@ -97,6 +99,7 @@ export default function App() {
   const { pathname, search } = useLocation();
   const { user } = useUser();
   const side = useSidebar();
+  useEffect(() => () => clearContext(), [user?.id]);
   const m = meta.data;
   const stale = m?.ageDays != null && m.ageDays > 4;
   const warn = m?.source === "snapshot" || stale;
@@ -137,6 +140,7 @@ export default function App() {
           <UserButton>
             <UserButton.UserProfilePage label="Koneksi AI" url="ai" labelIcon={<Icon name="sparkles" size={16} />}>
               <OpenRouterConnect flat />
+              <AiAccessToggle flat />
             </UserButton.UserProfilePage>
           </UserButton>
           <span className="label acc-name">{user?.firstName ?? user?.username ?? ""}</span>

@@ -18,6 +18,10 @@ DDL = """
         updated_at    timestamptz NOT NULL DEFAULT now(),
         PRIMARY KEY (user_id, provider)
     );
+    CREATE TABLE IF NOT EXISTS user_ai_settings (
+        user_id bigint PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
+        scope   text NOT NULL DEFAULT 'off' CHECK (scope IN ('off', 'public', 'portfolio'))
+    );
 """
 
 
@@ -93,5 +97,28 @@ def delete_key(user_id, provider):
                 (user_id, provider),
             )
             return cur.rowcount > 0
+    finally:
+        conn.close()
+
+def get_scope(user_id):
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT scope FROM user_ai_settings WHERE user_id = %s", (user_id,))
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    return row[0] if row else "off"
+
+
+def set_scope(user_id, scope):
+    conn = _connect()
+    try:
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO user_ai_settings (user_id, scope) VALUES (%s, %s) "
+                "ON CONFLICT (user_id) DO UPDATE SET scope = EXCLUDED.scope",
+                (user_id, scope),
+            )
     finally:
         conn.close()
