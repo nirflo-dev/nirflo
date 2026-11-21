@@ -1,9 +1,10 @@
-"""Portfolio endpoints: holdings, cash, evaluation (full and quick), mix and stored history. Data per akun."""
+"""Portfolio endpoints: holdings, cash (IDR dan USD), evaluation (full and quick), mix and stored history. Data per akun."""
 from __future__ import annotations
 
 import math
 from contextlib import contextmanager
 from datetime import date
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -12,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from psycopg2 import errors as pg_errors
 from pydantic import BaseModel, Field
 
-from analytics.portfolio import LOT_SIZE, cash_summary, evaluate
+from analytics.portfolio import LOT_SIZE, cash_summary, evaluate, fx_state
 from api.auth import clerk_display_name, current_clerk_id
 from api.main import Json, ttl_cache  # file ini di-include di akhir api/main.py, setelah Json terdefinisi
 from core import history as hist
@@ -93,8 +94,8 @@ def _clean_name(name: str, *, write: bool = False) -> str:
 
 
 def _load(user_id: int, name: str):
-    """Posisi dan saldo cash. Untuk mix, seluruh posisi digabung dan cash dijumlahkan;
-    setiap posisi tetap membawa tanggal belinya sendiri."""
+    """Posisi dan saldo cash (rupiah, dolar). Untuk mix, seluruh posisi digabung dan cash
+    dijumlahkan per mata uang; setiap posisi tetap membawa tanggal belinya sendiri."""
     if not _is_mix(name):
         return store.list_holdings(name, user_id=user_id), store.get_cash(name, user_id)
     parts = _mix_parts(name)
@@ -103,13 +104,14 @@ def _load(user_id: int, name: str):
     if absent:
         raise ValueError("Portofolio tidak ditemukan: " + ", ".join(absent))
     holdings = pd.concat([store.list_holdings(p, user_id=user_id) for p in parts], ignore_index=True)
-    return holdings, sum(store.get_cash(p, user_id) for p in parts)
+    balances = [store.get_cash(p, user_id) for p in parts]
+    return holdings, (sum(b[0] for b in balances), sum(b[1] for b in balances))
 
 
 def _require_holdings(user_id: int, name: str):
     holdings, cash = _load(user_id, name)
     if holdings.empty:
-        if cash > 0:
+        if cash[0] > 0 or cash[1] > 0:
             raise ValueError(
                 f"Portofolio '{name}' baru berisi cash. Tambahkan saham untuk menghitung risiko dan Sharpe ratio."
             )
@@ -119,10 +121,14 @@ def _require_holdings(user_id: int, name: str):
 
 @ttl_cache(300)
 def full_evaluation(user_id: int, name: str) -> dict:
-    holdings, cash = _require_holdings(user_id, name)
+    holdings, (cash_idr, cash_usd) = _require_holdings(user_id, name)
     tickers = sorted(holdings["ticker"].unique())
     prices, no_trade = load_price_inputs(tickers, holdings["buy_date"].min())
-    return evaluate(prices, holdings, load_macro_series("ID_RATE"), no_trade, cash=cash)
+    usdidr = load_macro_series("USDIDR") if cash_usd > 0 else None
+    return evaluate(
+        prices, holdings, load_macro_series("ID_RATE"), no_trade,
+        cash_idr=cash_idr, cash_usd=cash_usd, usdidr=usdidr,
+    )
 
 
 def _verdict(low: float, high: float) -> str:
@@ -132,7 +138,7 @@ def _verdict(low: float, high: float) -> str:
 @ttl_cache(300)
 def quick_evaluation(user_id: int, name: str) -> dict:
     """Estimasi dari statistik universe, tanpa membaca harga. Logika sama dengan cmd_quick di portfolio_cli.py."""
-    holdings, cash = _require_holdings(user_id, name)
+    holdings, (cash_idr, cash_usd) = _require_holdings(user_id, name)
     tickers = sorted(holdings["ticker"].unique())
     as_of, stats = universe_store.read_stats(tickers)
     if as_of is None:
@@ -167,6 +173,12 @@ def quick_evaluation(user_id: int, name: str) -> dict:
     avg_corr = (corr.to_numpy().sum() - count) / (count * (count - 1)) if count > 1 else None
     annual_vol = math.sqrt(variance) * k
 
+    fx = None
+    if cash_usd > 0:
+        rate, fx_date, fx_vol = fx_state(load_macro_series("USDIDR"))
+        # Mode cepat tidak membaca harga, jadi korelasi saham dan kurs tidak dihitung (dianggap 0).
+        fx = {"rate": rate, "date": fx_date, "vol": fx_vol, "rho": None}
+
     return {
         "as_of": str(as_of), "window": None,
         "weights": {t: float(w) for t, w in zip(tickers, weights)},
@@ -180,7 +192,7 @@ def quick_evaluation(user_id: int, name: str) -> dict:
                 "start": None, "end": None, "n_obs": n_obs, "basis": "mingguan",
             },
         },
-        **cash_summary(float(value.sum()), cash, annual_vol, mean_week * 52),
+        **cash_summary(float(value.sum()), cash_idr, cash_usd, fx, annual_vol, mean_week * 52),
         "price_jumps": [], "illiquid_tickers": [], "warnings": [],
     }
 
@@ -198,6 +210,7 @@ class NewHolding(BaseModel):
 
 class CashBody(BaseModel):
     amount: float = Field(ge=0, le=1e15)
+    currency: Literal["IDR", "USD"] = "IDR"
 
 
 @router.get("")
@@ -205,6 +218,14 @@ def portfolios(user: int = Depends(current_user)):
     with handled():
         rows = store.list_summaries(user)
     return Json(rows)
+
+
+@router.get("/fx")
+def fx_rate(user: int = Depends(current_user)):
+    """Kurs USD/IDR terakhir, dipakai UI untuk menampilkan setara rupiah cash dolar."""
+    with handled():
+        rate, fx_date, _ = fx_state(load_macro_series("USDIDR"))
+    return Json({"pair": "USD/IDR", "rate": rate, "date": fx_date})
 
 
 @router.get("/{name}/holdings")
@@ -227,9 +248,9 @@ def add_holding(name: str, body: NewHolding, user: int = Depends(current_user)):
 @router.put("/{name}/cash")
 def set_cash(name: str, body: CashBody, user: int = Depends(current_user)):
     with handled():
-        store.set_cash(_clean_name(name, write=True), body.amount, user)
+        store.set_cash(_clean_name(name, write=True), body.amount, user, body.currency)
     _invalidate()
-    return Json({"cash": body.amount})
+    return Json({"cash": body.amount, "currency": body.currency})
 
 
 @router.delete("/holdings/{holding_id}")

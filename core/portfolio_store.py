@@ -16,6 +16,8 @@ DEFAULT_PORTFOLIO = "default"
 # agar data dari CLI tampil di UI akun yang sama.
 DEFAULT_CLERK_ID = os.getenv("PORTFOLIO_OWNER", "local")
 MAX_CASH = 1e15
+# Nama kolom dipilih dari daftar ini saja, tidak pernah dari input pengguna.
+CASH_COLUMNS = {"IDR": "cash", "USD": "cash_usd"}
 HOLDING_COLUMNS = ["id", "portfolio", "ticker", "lots", "buy_date", "user_id"]
 EVALUATION_COLUMNS = [
     "as_of",
@@ -37,6 +39,8 @@ DDL = """
 
     ALTER TABLE portfolios
         ADD COLUMN IF NOT EXISTS cash numeric(18,2) NOT NULL DEFAULT 0 CHECK (cash >= 0);
+    ALTER TABLE portfolios
+        ADD COLUMN IF NOT EXISTS cash_usd numeric(18,2) NOT NULL DEFAULT 0 CHECK (cash_usd >= 0);
 
     CREATE TABLE IF NOT EXISTS portfolio_holdings (
         id           bigserial PRIMARY KEY,
@@ -180,9 +184,9 @@ def list_summaries(user_id):
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT p.name, COUNT(DISTINCT h.ticker), COUNT(h.id), MIN(h.buy_date), p.cash "
+                "SELECT p.name, COUNT(DISTINCT h.ticker), COUNT(h.id), MIN(h.buy_date), p.cash, p.cash_usd "
                 "FROM portfolios p LEFT JOIN portfolio_holdings h ON h.portfolio_id = p.id "
-                "WHERE p.user_id = %s GROUP BY p.id, p.name, p.cash ORDER BY p.name",
+                "WHERE p.user_id = %s GROUP BY p.id, p.name, p.cash, p.cash_usd ORDER BY p.name",
                 (user_id,),
             )
             rows = cur.fetchall()
@@ -195,26 +199,32 @@ def list_summaries(user_id):
             "positions": int(positions),
             "firstBuy": first.isoformat() if first else "",
             "cash": float(cash),
+            "cash_usd": float(cash_usd),
         }
-        for name, tickers, positions, first, cash in rows
+        for name, tickers, positions, first, cash, cash_usd in rows
     ]
 
 
 def get_cash(portfolio, user_id):
+    """Saldo cash portofolio sebagai (rupiah, dolar)."""
     conn = _connect()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT cash FROM portfolios WHERE user_id = %s AND name = %s", (user_id, portfolio)
+                "SELECT cash, cash_usd FROM portfolios WHERE user_id = %s AND name = %s",
+                (user_id, portfolio),
             )
             row = cur.fetchone()
     finally:
         conn.close()
-    return float(row[0]) if row else 0.0
+    return (float(row[0]), float(row[1])) if row else (0.0, 0.0)
 
 
-def set_cash(portfolio, amount, user_id):
-    """Mengganti saldo cash portofolio (bukan menambah)."""
+def set_cash(portfolio, amount, user_id, currency="IDR"):
+    """Mengganti saldo cash pada satu mata uang (bukan menambah)."""
+    column = CASH_COLUMNS.get(str(currency).upper())
+    if column is None:
+        raise ValueError("mata uang cash harus IDR atau USD")
     amount = float(amount)
     if not math.isfinite(amount) or amount < 0:
         raise ValueError("cash tidak boleh negatif")
@@ -224,7 +234,7 @@ def set_cash(portfolio, amount, user_id):
     try:
         with conn, conn.cursor() as cur:
             pid = _portfolio_id(cur, user_id, portfolio)
-            cur.execute("UPDATE portfolios SET cash = %s WHERE id = %s", (round(amount, 2), pid))
+            cur.execute(f"UPDATE portfolios SET {column} = %s WHERE id = %s", (round(amount, 2), pid))
     finally:
         conn.close()
 

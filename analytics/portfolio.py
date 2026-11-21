@@ -1,3 +1,4 @@
+import math
 from datetime import date
 
 import numpy as np
@@ -9,6 +10,7 @@ LOT_SIZE = 100
 LOOKBACK_WEEKS = 156
 MIN_DAILY_OBS = 60
 MIN_WEEKLY_OBS = 52
+MIN_FX_WEEKS = 20
 ILLIQUID_THRESHOLD = 0.20
 STALE_RF_DAYS = 120
 STALE_PRICE_DAYS = 5
@@ -98,40 +100,73 @@ def _price_jumps(prices, since):
     return found
 
 
-def cash_summary(stock_value, cash, stock_vol, stock_excess):
+def _fx_weekly(usdidr):
+    fx = usdidr.sort_index().dropna()
+    return fx, fx.resample("W-FRI").last().pct_change(fill_method=None).dropna()
+
+
+def fx_state(usdidr):
+    """Kurs USD/IDR terakhir, tanggalnya, dan volatilitas tahunan dari return mingguan."""
+    if usdidr is None or usdidr.dropna().empty:
+        raise ValueError("Kurs USD/IDR belum tersedia, sehingga cash dolar tidak dapat dikonversi ke rupiah.")
+    fx, weekly = _fx_weekly(usdidr)
+    weekly = weekly.tail(LOOKBACK_WEEKS)
+    vol = weekly.std(ddof=1) * math.sqrt(WEEKS_PER_YEAR) if len(weekly) >= MIN_FX_WEEKS else None
+    return float(fx.iloc[-1]), _date(fx.index[-1]), _num(vol, 6)
+
+
+def cash_summary(stock_value, cash_idr, cash_usd, fx, stock_vol, stock_excess):
     """Dampak cash pada portofolio.
 
-    Aturan: Sharpe hanya menilai bagian saham. Cash diasumsikan berimbal sebesar suku bunga
-    bebas risiko, sehingga excess return dan volatilitasnya nol dan Sharpe tidak berubah berapa
-    pun porsi cash-nya. Volatilitas dan excess return total adalah nilai bagian saham dikali
-    porsi saham terhadap total.
+    Aturan: Sharpe hanya menilai bagian saham. Cash rupiah dianggap berimbal sebesar suku bunga
+    bebas risiko, sehingga tidak mengubah Sharpe berapa pun porsinya. Cash dolar tidak bebas
+    risiko dalam rupiah, jadi volatilitas total ikut memuat risiko kurs USD/IDR beserta
+    korelasinya dengan bagian saham (korelasi tidak diketahui dianggap nol).
     """
-    cash = max(0.0, float(cash or 0.0))
+    cash_idr = max(0.0, float(cash_idr or 0.0))
+    cash_usd = max(0.0, float(cash_usd or 0.0))
     stock_value = float(stock_value)
-    total = stock_value + cash
-    cash_weight = cash / total if total > 0 else 0.0
-    share = 1.0 - cash_weight
+    usd_in_idr = cash_usd * fx["rate"] if cash_usd > 0 and fx else 0.0
+    cash_total = cash_idr + usd_in_idr
+    total = stock_value + cash_total
+    cash_weight = cash_total / total if total > 0 else 0.0
+    share_stock = stock_value / total if total > 0 else 1.0
+    share_usd = usd_in_idr / total if total > 0 else 0.0
 
-    def scaled(x):
-        return None if x is None else _num(x * share, 6)
+    total_vol, fx_included = None, True
+    if stock_vol is not None:
+        variance = (share_stock * stock_vol) ** 2
+        fx_vol = fx.get("vol") if fx else None
+        if share_usd > 0:
+            if fx_vol is None:
+                fx_included = False
+            else:
+                rho = fx.get("rho") or 0.0
+                variance += (share_usd * fx_vol) ** 2 + 2 * share_stock * share_usd * rho * stock_vol * fx_vol
+        total_vol = math.sqrt(max(variance, 0.0))
 
     return {
         "cash": {
-            "amount": _num(cash, 2),
+            "amount": _num(cash_total, 2),
             "weight": _num(cash_weight, 6),
+            "idr": _num(cash_idr, 2),
+            "usd": _num(cash_usd, 2),
+            "usd_in_idr": _num(usd_in_idr, 2),
             "stock_value": _num(stock_value, 2),
             "total_value": _num(total, 2),
+            "fx": fx,
         },
         "portfolio_risk": {
             "stock_vol": _num(stock_vol, 6),
-            "total_vol": scaled(stock_vol),
+            "total_vol": _num(total_vol, 6),
             "stock_excess_return": _num(stock_excess, 6),
-            "total_excess_return": scaled(stock_excess),
+            "total_excess_return": None if stock_excess is None else _num(stock_excess * share_stock, 6),
+            "fx_included": fx_included,
         },
     }
 
 
-def evaluate(prices, holdings, rf_annual_pct, no_trade_ratio=None, cash=0.0):
+def evaluate(prices, holdings, rf_annual_pct, no_trade_ratio=None, cash_idr=0.0, cash_usd=0.0, usdidr=None):
     tickers = sorted(holdings["ticker"].unique())
     missing = [t for t in tickers if t not in prices.columns]
     if missing:
@@ -200,7 +235,17 @@ def evaluate(prices, holdings, rf_annual_pct, no_trade_ratio=None, cash=0.0):
             f"Data suku bunga terakhir {rf_age} hari lalu, nilai terakhir dipakai untuk periode setelahnya."
         )
 
-    current = _sharpe(weekly.mul(weights, axis=1).sum(axis=1), rf_weekly, WEEKS_PER_YEAR, "mingguan")
+    stock_week = weekly.mul(weights, axis=1).sum(axis=1)
+    current = _sharpe(stock_week, rf_weekly, WEEKS_PER_YEAR, "mingguan")
+
+    fx = None
+    if cash_usd and cash_usd > 0:
+        rate, fx_date, fx_vol = fx_state(usdidr)
+        _, fx_weekly = _fx_weekly(usdidr)
+        joint = pd.concat([stock_week.rename("p"), fx_weekly.rename("f")], axis=1).dropna()
+        rho = _num(joint["p"].corr(joint["f"]), 4) if len(joint) >= MIN_FX_WEEKS else None
+        fx = {"rate": rate, "date": fx_date, "vol": fx_vol, "rho": rho}
+
     matrix = [[_num(v, 4) for v in row] for row in corr.to_numpy().tolist()]
     return {
         "as_of": _date(as_of),
@@ -219,7 +264,7 @@ def evaluate(prices, holdings, rf_annual_pct, no_trade_ratio=None, cash=0.0):
             "equal_weight": _sharpe(weekly.mean(axis=1), rf_weekly, WEEKS_PER_YEAR, "mingguan"),
         },
         **cash_summary(
-            value.sum(), cash, current["annual_vol"], current["annual_excess_return"]
+            value.sum(), cash_idr, cash_usd, fx, current["annual_vol"], current["annual_excess_return"]
         ),
         "price_jumps": jumps,
         "illiquid_tickers": illiquid,

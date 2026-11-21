@@ -161,23 +161,103 @@ button.stk-main:hover:not(:disabled),.stk.hot>button.stk-main{border:0;backgroun
 .pfx-mix label small{margin-left:auto;color:var(--muted)}
 .pfx-mix input{width:auto;height:auto}
 .pfx-mix .primary{margin-top:6px}
-.pfx-addwrap{scroll-margin-top:96px}
 
-/* Panel Tambah (saham dan cash) */
-.pfx-add{margin:0 0 16px;padding:18px;border:1px solid color-mix(in srgb,var(--accent) 45%,var(--border));box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 10%,transparent);scroll-margin-top:16px}
-.pfx-add.inline{margin:0;padding:0;border:0;box-shadow:none;background:none}
-.pfx-add-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:16px}
-.pfx-add-head>div{margin-right:auto}
-.pfx-add-head strong{display:block;font-size:16px}
-.pfx-add-head p{margin:2px 0 0;font-size:13px}
+
+/* ===== Panel Tambah ===== */
+.pfx-add{position:relative;margin:0 0 18px;padding:22px;border:1px solid color-mix(in srgb,var(--accent) 40%,var(--border));border-radius:var(--radius);overflow:hidden;scroll-margin-top:16px;box-shadow:0 24px 60px -30px color-mix(in srgb,var(--accent) 60%,transparent);animation:pfxopen .55s cubic-bezier(.2,.8,.2,1) both}
+.pfx-add::before{content:"";position:absolute;inset:0 0 auto 0;height:2px;background:linear-gradient(90deg,var(--accent),var(--accent-2,var(--accent)),transparent,var(--accent));background-size:300% 100%;animation:pfxsheen 5s linear infinite}
+.pfx-add.inline{margin:0;padding:0;border:0;box-shadow:none;background:none;animation:none;overflow:visible}
+.pfx-add.inline::before{display:none}
 .pfx-add .pfx-form{margin:0;padding:0;border:0;background:none;animation:none}
-.pfx-saved{grid-column:1/-1;margin:0;padding:8px 12px;border-left:3px solid var(--up);border-radius:var(--radius-sm);background:color-mix(in srgb,var(--up) 10%,transparent);font-size:13px}
+.pfx-add-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:20px}
+.pfx-badge{display:grid;place-items:center;width:46px;height:46px;border-radius:14px;color:#fff;background:linear-gradient(135deg,var(--accent),var(--accent-2,var(--accent)));box-shadow:0 8px 20px -8px var(--accent);animation:pfxpop .5s cubic-bezier(.3,1.6,.5,1) both}
+.pfx-add-title{margin-right:auto;min-width:200px}
+.pfx-add-title strong{display:block;font-size:17px;letter-spacing:-.01em}
+.pfx-add-title p{margin:3px 0 0;font-size:13px;color:var(--muted)}
+.pfx-x{height:36px;padding:0 14px;border:1px solid var(--border);border-radius:10px;background:none;color:var(--muted);font-size:13px;transition:color .15s,border-color .15s,transform .15s}
+.pfx-x:hover{color:var(--text);border-color:var(--muted);transform:translateY(-1px)}
+.pfx-swap{animation:pfxswap .45s cubic-bezier(.2,.8,.2,1) both}
 
-/* Form cash */
-.cash-form2{display:grid;gap:14px;max-width:460px}
-.cash-form2 input{height:40px}
-.pfx-chips{display:flex;gap:8px;flex-wrap:wrap}
-.pfx-chips button{height:32px;padding:0 14px;border-radius:999px;font-size:13px}
-.cash-preview{margin:0;font-size:14px;color:var(--muted)}
-.cash-preview strong{color:var(--text)}
-.cash-preview.bad{color:var(--down)}
+/* kontrol segmented dengan pil bergeser */
+.pill{position:relative;display:grid;grid-template-columns:repeat(var(--n,2),1fr);padding:4px;border:1px solid var(--border);border-radius:12px;background:var(--bg)}
+.pill-thumb{position:absolute;top:4px;bottom:4px;left:4px;width:calc((100% - 8px) / var(--n,2));border-radius:9px;background:color-mix(in srgb,var(--accent) 24%,var(--surface,var(--bg)));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 45%,transparent);transform:translateX(calc(var(--i,0) * 100%));transition:transform .42s cubic-bezier(.3,1.35,.5,1)}
+.pill>button{position:relative;z-index:1;height:36px;padding:0 18px;border:0;border-radius:9px;background:none;color:var(--muted);font-size:14px;font-weight:500;white-space:nowrap;cursor:pointer;transition:color .25s}
+.pill>button:hover{color:var(--text);background:none;border:0}
+.pill>button.on{color:var(--text);font-weight:600}
+.pill.sm>button{height:32px;padding:0 14px;font-size:13px}
+
+/* form cash */
+.cf{display:grid;gap:16px;max-width:520px}
+.cf-top{display:flex;gap:12px;flex-wrap:wrap}
+.cf-balance{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:16px 18px;border:1px solid var(--border);border-radius:14px;background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 9%,transparent),transparent 70%)}
+.cf-balance small{display:block;margin-bottom:4px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.cf-balance strong{font-size:26px;font-weight:650;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.cf-side{display:grid;gap:2px;text-align:right;font-size:12.5px;color:var(--muted)}
+.cf-fx{animation:pfxfade .4s both}
+
+.amt{display:grid;gap:8px}
+.amt-label{font-size:13px;color:var(--muted)}
+.pfx-add .amt-box{display:flex;align-items:center;gap:12px;height:68px;padding:0 20px;border:1px solid var(--border);border-radius:16px;background:var(--bg);transition:border-color .2s,box-shadow .3s}
+.pfx-add .amt-box:focus-within{border-color:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 18%,transparent)}
+.pfx-add .amt-box.bad{border-color:var(--down);box-shadow:0 0 0 4px color-mix(in srgb,var(--down) 16%,transparent);animation:pfxshake .38s}
+.amt-sym{min-width:36px;font-size:15px;font-weight:600;color:var(--muted)}
+.pfx-add .amt-box input{flex:1;min-width:0;height:100%;padding:0;border:0;outline:0;box-shadow:none;background:none;color:var(--text);font-size:30px;font-weight:650;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.pfx-add .amt-box input::placeholder{color:color-mix(in srgb,var(--muted) 55%,transparent)}
+
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chips button{height:34px;padding:0 14px;border:1px solid var(--border);border-radius:999px;background:none;font-size:13px;color:var(--text);cursor:pointer;animation:pfxpop .4s cubic-bezier(.3,1.5,.5,1) both;animation-delay:calc(var(--i,0) * 45ms);transition:border-color .15s,background .15s,transform .15s}
+.chips button:hover{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent);transform:translateY(-2px)}
+.chips button:active{transform:scale(.94)}
+.chips button.all{border-style:dashed;color:var(--muted)}
+
+.cf-preview{display:grid;gap:10px;padding:16px 18px;border:1px solid var(--border);border-radius:14px;background:color-mix(in srgb,var(--text) 3%,transparent)}
+.cf-preview.idle .cf-row.after{opacity:.5}
+.cf-row{display:grid;grid-template-columns:70px 1fr auto;align-items:center;gap:12px;font-size:13px}
+.cf-row span{color:var(--muted)}
+.cf-row em{min-width:120px;font-style:normal;font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
+.cf-bar{display:block;height:8px;border-radius:99px;background:color-mix(in srgb,var(--text) 8%,transparent);overflow:hidden}
+.cf-bar b{display:block;height:100%;border-radius:99px;background:color-mix(in srgb,var(--muted) 70%,transparent);transition:width .6s cubic-bezier(.2,.8,.2,1)}
+.cf-row.after .cf-bar b{background:linear-gradient(90deg,var(--accent),var(--accent-2,var(--accent)))}
+.cf-bar.bad b{background:var(--down)}
+.cf-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-height:26px;font-size:13px;color:var(--muted)}
+.cf-foot .bad{color:var(--down)}
+.delta{padding:3px 10px;border-radius:999px;font-weight:600;font-variant-numeric:tabular-nums;animation:pfxpop .45s cubic-bezier(.3,1.6,.5,1) both}
+.delta.up{color:var(--up);background:color-mix(in srgb,var(--up) 14%,transparent)}
+.delta.down{color:var(--down);background:color-mix(in srgb,var(--down) 14%,transparent)}
+.eq{margin-left:auto;font-variant-numeric:tabular-nums}
+.pfx-submit{height:50px;border-radius:14px;font-size:15px;font-weight:600;transition:transform .15s,box-shadow .25s,opacity .2s}
+.pfx-submit:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 14px 28px -14px var(--accent)}
+.pfx-submit:active:not(:disabled){transform:scale(.985)}
+
+/* layar sukses */
+.pfx-done{display:grid;justify-items:center;gap:6px;padding:28px 0;text-align:center;animation:pfxfade .35s both}
+.pfx-done strong{font-size:18px}
+.pfx-done p{margin:0;color:var(--muted)}
+.pfx-check{width:64px;height:64px;margin-bottom:6px}
+.pfx-check circle{stroke:var(--up);stroke-dasharray:151;stroke-dashoffset:151;animation:pfxdraw .6s ease forwards}
+.pfx-check path{stroke:var(--up);stroke-dasharray:40;stroke-dashoffset:40;animation:pfxdraw .45s ease .45s forwards}
+
+/* konfirmasi simpan saham */
+.pfx-saved{grid-column:1/-1;display:flex;align-items:center;gap:8px;margin:0;padding:9px 12px;border-left:3px solid var(--up);border-radius:var(--radius-sm);background:color-mix(in srgb,var(--up) 10%,transparent);font-size:13px;animation:pfxswap .4s cubic-bezier(.2,.8,.2,1) both}
+.pfx-saved svg{flex:none;color:var(--up)}
+
+@keyframes pfxopen{from{opacity:0;transform:translateY(-12px) scale(.985)}to{opacity:1;transform:none}}
+@keyframes pfxswap{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes pfxfade{from{opacity:0}to{opacity:1}}
+@keyframes pfxpop{from{opacity:0;transform:scale(.6)}to{opacity:1;transform:none}}
+@keyframes pfxsheen{to{background-position:-300% 0}}
+@keyframes pfxdraw{to{stroke-dashoffset:0}}
+@keyframes pfxshake{20%{transform:translateX(-6px)}40%{transform:translateX(5px)}60%{transform:translateX(-3px)}80%{transform:translateX(2px)}}
+
+@media(max-width:640px){
+  .pfx-add{padding:16px}
+  .cf-balance strong{font-size:22px}
+  .cf-row{grid-template-columns:58px 1fr}
+  .cf-row em{grid-column:1/-1;text-align:left}
+  .pfx-add .amt-box input{font-size:24px}
+}
+@media(prefers-reduced-motion:reduce){
+  .pfx-add,.pfx-add::before,.pfx-badge,.pfx-swap,.chips button,.delta,.pfx-saved,.pfx-done,.cf-fx,.amt-box.bad{animation:none}
+  .pill-thumb,.cf-bar b{transition:none}
+  .pfx-check circle,.pfx-check path{animation:none;stroke-dashoffset:0}
+}

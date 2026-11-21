@@ -2,7 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
 import type { Num } from "./types";
 
-export type PfSummary = { name: string; tickers: number; positions: number; firstBuy: string; cash: number };
+export type Currency = "IDR" | "USD";
+export type PfSummary = { name: string; tickers: number; positions: number; firstBuy: string; cash: number; cash_usd: number };
 export type Holding = { id: number; portfolio: string; ticker: string; lots: number; buy_date: string };
 
 export type Verdict = "positif" | "negatif" | "tidak_pasti" | "tidak_dapat_dihitung";
@@ -10,8 +11,14 @@ export type SharpeBlock = {
   sharpe: Num; ci_low: Num; ci_high: Num; verdict: Verdict; annual_excess_return: Num; annual_vol: Num;
   start: string | null; end: string | null; n_obs: number; basis: string;
 };
-export type CashInfo = { amount: number; weight: number; stock_value: number; total_value: number };
-export type PortfolioRisk = { stock_vol: Num; total_vol: Num; stock_excess_return: Num; total_excess_return: Num };
+export type FxInfo = { rate: number; date: string; vol: Num; rho: Num };
+export type CashInfo = {
+  amount: number; weight: number; idr: number; usd: number; usd_in_idr: number;
+  stock_value: number; total_value: number; fx: FxInfo | null;
+};
+export type PortfolioRisk = {
+  stock_vol: Num; total_vol: Num; stock_excess_return: Num; total_excess_return: Num; fx_included: boolean;
+};
 export type Evaluation = {
   mode: "full" | "quick";
   as_of: string;
@@ -31,6 +38,7 @@ export type PfHistory = {
   x: string[]; sharpe_since_buy: Num[]; sharpe_current_weights: Num[]; sharpe_equal_weight: Num[];
   avg_correlation: Num[]; warnings: number[];
 };
+export type Fx = { pair: string; rate: number; date: string };
 
 /** Portofolio gabungan (mix) bersifat virtual dan baca-saja: namanya "mix:A,B". */
 export const MIX_PREFIX = "mix:";
@@ -42,6 +50,9 @@ const enc = encodeURIComponent;
 
 export const usePortfolios = () =>
   useQuery({ queryKey: ["pf", "list"], queryFn: ({ signal }) => api<PfSummary[]>("/portfolio", undefined, { signal }), staleTime: 60_000, retry: 0 });
+
+export const useFx = () =>
+  useQuery({ queryKey: ["pf", "fx"], queryFn: ({ signal }) => api<Fx>("/portfolio/fx", undefined, { signal }), staleTime: 10 * 60_000, retry: 0 });
 
 export const useHoldings = (name: string) =>
   useQuery({ queryKey: ["pf", "holdings", name], queryFn: ({ signal }) => api<Holding[]>(`/portfolio/${enc(name)}/holdings`, undefined, { signal }), staleTime: 60_000, retry: 0 });
@@ -67,9 +78,9 @@ export function usePortfolioMutations(name: string) {
     onSuccess: refresh,
   });
   const setCash = useMutation({
-    mutationFn: (amount: number) =>
+    mutationFn: (body: { amount: number; currency: Currency }) =>
       api(`/portfolio/${enc(name)}/cash`, undefined, {
-        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ amount }),
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       }),
     onSuccess: refresh,
   });

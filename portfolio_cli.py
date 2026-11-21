@@ -104,10 +104,13 @@ def cmd_import(args):
 
 def cmd_evaluate(args):
     holdings, prices, no_trade = load_inputs(args.portfolio)
-        result = evaluate(
+    cash_idr, cash_usd = store.get_cash(args.portfolio, store.default_user_id())
+    result = evaluate(
         prices, holdings, load_macro_series("ID_RATE"), no_trade,
-        cash=store.get_cash(args.portfolio, store.default_user_id()),
+        cash_idr=cash_idr, cash_usd=cash_usd,
+        usdidr=load_macro_series("USDIDR") if cash_usd > 0 else None,
     )
+
     print_report(args.portfolio, result)
     if args.save:
         store.save_evaluation(args.portfolio, result, store.default_user_id())
@@ -133,8 +136,11 @@ def cmd_evaluate_all(args):
     for (user_id, name), holdings in holdings_all.groupby(["user_id", "portfolio"]):
         label = f"user {user_id} / {name}"
         try:
-            result = evaluate(prices, holdings, rf, no_trade, cash=store.get_cash(name, int(user_id)))
-            store.save_evaluation(name, result, int(user_id))
+            cash_idr, cash_usd = store.get_cash(name, int(user_id))
+            result = evaluate(
+                prices, holdings, rf, no_trade, cash_idr=cash_idr, cash_usd=cash_usd,
+                usdidr=load_macro_series("USDIDR") if cash_usd > 0 else None,
+            )
             print(
                 f"{label}: per {result['as_of']} | "
                 f"Sharpe {num(result['sharpe']['current_weights']['sharpe'])} | "

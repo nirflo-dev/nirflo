@@ -11,8 +11,8 @@ import {
 import { baseOption, Chart, line, X, Y, yName } from "../components/Chart";
 import { Donut, type Slice } from "../components/Donut";
 import { Icon } from "../components/Icon";
-import { TickerSearch } from "../components/TickerSearch";
 import { Chip, DataTable, ErrorState, Section, Segmented, type Col } from "../components/ui";
+import { AddPanel, rp, usd, type CashBalance, type Composer } from "./AddPanel";
 import "./portfolio.css";
 
 const VERDICTS: Record<SharpeBlock["verdict"], string> = {
@@ -40,7 +40,6 @@ const SHARPE_ROWS = [
 ] as const;
 
 const clamp = (v: number | null | undefined) => `${Math.max(0, Math.min(100, (v ?? 0) * 100))}%`;
-const rp = (v: number) => `Rp ${Math.round(v).toLocaleString("id-ID")}`;
 const corrWord = (r: number) => (r < 0.3 ? "rendah" : r < 0.6 ? "sedang" : "tinggi");
 const relation = (r: number) => {
   const a = Math.abs(r);
@@ -48,15 +47,15 @@ const relation = (r: number) => {
   return `${r > 0 ? "searah" : "berlawanan"}, ${a < 0.4 ? "lemah" : a < 0.7 ? "sedang" : "kuat"}`;
 };
 
-type Composer = "saham" | "cash";
 type Insight = { tone: "good" | "info" | "warn"; text: string };
 
 function insights(e: Evaluation, sectorOf: (t: string) => string | undefined): Insight[] {
   const out: Insight[] = [];
   if (e.cash && e.cash.weight > 0) {
+    const fxText = e.cash.usd > 0 ? " Cash dolar ikut menambah risiko kurs." : "";
     out.push({
       tone: "info",
-      text: `Cash ${pct(e.cash.weight, 0)} dari total. Sharpe hanya menilai bagian saham, sedangkan volatilitas total turun menjadi ${pct(e.portfolio_risk.total_vol, 1)} dari ${pct(e.portfolio_risk.stock_vol, 1)}.`,
+      text: `Cash ${pct(e.cash.weight, 0)} dari total. Sharpe hanya menilai bagian saham, sedangkan volatilitas total menjadi ${pct(e.portfolio_risk.total_vol, 1)} dari ${pct(e.portfolio_risk.stock_vol, 1)}.${fxText}`,
     });
   }
   const rows = Object.keys(e.weights).map((t) => ({ t, w: e.weights[t] ?? 0, r: e.risk_contribution[t] ?? 0 }));
@@ -110,8 +109,16 @@ export default function PortfolioPage() {
   const split = useSplit("pf-split-v2", 0.5, 0.4, 0.7);
 
   const mix = isMix(name);
-  const cashOf = (n: string) => list.data?.find((p) => p.name === n)?.cash ?? 0;
-  const cash = mix ? mixParts(name).reduce((s, p) => s + cashOf(p), 0) : cashOf(name);
+  const cashOf = (n: string): CashBalance => {
+    const p = list.data?.find((x) => x.name === n);
+    return { idr: p?.cash ?? 0, usd: p?.cash_usd ?? 0 };
+  };
+  const cash: CashBalance = mix
+    ? mixParts(name).reduce<CashBalance>((s, p) => {
+        const c = cashOf(p);
+        return { idr: s.idr + c.idr, usd: s.usd + c.usd };
+      }, { idr: 0, usd: 0 })
+    : cashOf(name);
 
   const sectors = useMemo(() => new Map((tickers.data ?? []).map((t) => [t.ticker, t.sector])), [tickers.data]);
   const sectorOf = (t: string) => sectors.get(t);
@@ -247,7 +254,7 @@ function PortfolioSwitcher({ value, items, onChange }: { value: string; items: P
     };
   }, [open, mixed, value]);
   const known = mixed || items.some((p) => p.name === value);
-  const list: PfSummary[] = known ? items : [{ name: value, tickers: 0, positions: 0, firstBuy: "", cash: 0 }, ...items];
+  const list: PfSummary[] = known ? items : [{ name: value, tickers: 0, positions: 0, firstBuy: "", cash: 0, cash_usd: 0 }, ...items];
   const choose = (n: string) => {
     setOpen(false);
     setDraft("");
@@ -262,7 +269,7 @@ function PortfolioSwitcher({ value, items, onChange }: { value: string; items: P
   const combine = () => {
     if (picked.length >= 2) choose(mixName(picked));
   };
-  const caption = (p: PfSummary) => (p.tickers ? `${p.tickers} saham` : p.cash > 0 ? "cash saja" : "kosong");
+  const caption = (p: PfSummary) => (p.tickers ? `${p.tickers} saham` : p.cash > 0 || p.cash_usd > 0 ? "cash saja" : "kosong");
   return (
     <div className="pfx-switch" ref={box}>
       <button type="button" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen(!open)}>
@@ -317,7 +324,7 @@ function HeroSkeleton() {
   );
 }
 
-function EmptyPortfolio({ name, cash }: { name: string; cash: number }) {
+function EmptyPortfolio({ name, cash }: { name: string; cash: CashBalance }) {
   const [tab, setTab] = useState<Composer>("saham");
   return (
     <Section title={`Mulai portofolio “${name}”`} className="pfx-empty rise">
@@ -423,7 +430,7 @@ type Group = { ticker: string; lots: number; items: Holding[] };
 
 function StocksPanel({ name, holdings, e, sectorOf, colorOf, hover, setHover, readOnly, cash, onEditCash }: {
   name: string; holdings: Holding[]; e?: Evaluation; sectorOf: (t: string) => string | undefined; colorOf: (t: string) => string;
-  hover: string | null; setHover: (k: string | null) => void; readOnly: boolean; cash: number; onEditCash: () => void;
+  hover: string | null; setHover: (k: string | null) => void; readOnly: boolean; cash: CashBalance; onEditCash: () => void;
 }) {
   const grown = useMounted();
   const { remove } = usePortfolioMutations(name);
@@ -441,6 +448,7 @@ function StocksPanel({ name, holdings, e, sectorOf, colorOf, hover, setHover, re
     return [...m.values()].sort((a, b) => (e?.weights[b.ticker] ?? 0) - (e?.weights[a.ticker] ?? 0) || a.ticker.localeCompare(b.ticker));
   }, [holdings, e]);
   const totalLots = holdings.reduce((s, h) => s + h.lots, 0);
+  const hasCash = cash.idr > 0 || cash.usd > 0;
 
   return (
     <Section title={`Saham (${groups.length})`} className="pfx-stocks rise d2">
@@ -506,144 +514,35 @@ function StocksPanel({ name, holdings, e, sectorOf, colorOf, hover, setHover, re
           );
         })}
       </ul>
-      {(cash > 0 || !readOnly) && (
+      {(hasCash || !readOnly) && (
         <div className="cash-row">
           <span className="cash-name">
             <i className="stk-dot cash" />
-            <span><strong>Cash</strong><small>Dianggap berimbal sebesar suku bunga bebas risiko</small></span>
+            <span>
+              <strong>Cash</strong>
+              <small>{cash.usd > 0 ? "Cash dolar ikut menambah risiko kurs" : "Dianggap berimbal sebesar suku bunga bebas risiko"}</small>
+            </span>
           </span>
           <span className="cash-val">
-            <b>{rp(cash)}</b>
-            <small>{cash > 0 ? (e?.cash ? `${pct(e.cash.weight, 1)} dari total` : "") : "belum diatur"}</small>
+            {hasCash ? (
+              <>
+                {cash.idr > 0 && <b>{rp(cash.idr)}</b>}
+                {cash.usd > 0 && (
+                  <b>
+                    {usd(cash.usd)}
+                    {e?.cash?.fx && <small className="cash-eq"> setara {rp(cash.usd * e.cash.fx.rate)}</small>}
+                  </b>
+                )}
+                {e?.cash && <small>{pct(e.cash.weight, 1)} dari total</small>}
+              </>
+            ) : <b>belum diatur</b>}
           </span>
-          {!readOnly && <button type="button" className="btn-ghost" onClick={onEditCash}>{cash > 0 ? "Atur" : "Tambah"}</button>}
+          {!readOnly && <button type="button" className="btn-ghost" onClick={onEditCash}>{hasCash ? "Atur" : "Tambah"}</button>}
         </div>
       )}
       <div className="stk-total"><span>Total</span><span>{num(totalLots, 2)} lot di {groups.length} saham</span></div>
       {remove.isError && <p className="down" role="alert">{remove.error.message}</p>}
     </Section>
-  );
-}
-
-function AddPanel({ name, cash, tab, setTab, onClose, inline = false }: {
-  name: string; cash: number; tab: Composer; setTab: (t: Composer) => void; onClose: () => void; inline?: boolean;
-}) {
-  const ref = useRef<HTMLElement>(null);
-  useEffect(() => {
-    if (!inline) ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [inline, tab]);
-  return (
-    <section className={`card pfx-add${inline ? " inline" : " rise"}`} ref={ref} aria-label="Tambah ke portofolio">
-      <div className="pfx-add-head">
-        <div>
-          <strong>Tambah ke “{name}”</strong>
-          <p className="muted">Pilih yang ingin Anda tambahkan.</p>
-        </div>
-        <Segmented
-          label="Jenis yang ditambahkan" value={tab} onChange={setTab}
-          options={[{ value: "saham", label: "Saham" }, { value: "cash", label: "Cash" }]}
-        />
-        {!inline && <button type="button" className="btn-ghost" onClick={onClose}>Tutup</button>}
-      </div>
-      {tab === "saham" ? <AddHolding name={name} /> : <CashForm name={name} cash={cash} onDone={inline ? () => undefined : onClose} />}
-    </section>
-  );
-}
-
-type CashOp = "add" | "sub" | "set";
-const CASH_PRESETS = [1_000_000, 5_000_000, 10_000_000, 50_000_000];
-
-function CashForm({ name, cash, onDone }: { name: string; cash: number; onDone: () => void }) {
-  const { setCash } = usePortfolioMutations(name);
-  const [op, setOp] = useState<CashOp>("add");
-  const [draft, setDraft] = useState("");
-  const amount = Number(draft);
-  const has = draft.trim() !== "" && Number.isFinite(amount) && amount >= 0;
-  const raw = !has ? null : op === "add" ? cash + amount : op === "sub" ? cash - amount : amount;
-  const next = raw == null ? null : Math.round(raw * 100) / 100;
-  const valid = next != null && next >= 0 && (op === "set" || amount > 0);
-  const bump = (v: number) => setDraft(String((has ? amount : 0) + v));
-  const submit = (ev: FormEvent) => {
-    ev.preventDefault();
-    if (!valid || next == null) return;
-    setCash.mutate(next, { onSuccess: () => { setDraft(""); onDone(); } });
-  };
-  return (
-    <form className="cash-form2" onSubmit={submit}>
-      <Segmented
-        label="Jenis perubahan cash" value={op} onChange={setOp}
-        options={[{ value: "add", label: "Tambah" }, { value: "sub", label: "Kurangi" }, { value: "set", label: "Atur saldo" }]}
-      />
-      <label className="field">
-        <span>{op === "set" ? "Saldo baru" : "Jumlah"}<small>Saldo sekarang {rp(cash)}</small></span>
-        <span className="pfx-unit pre">
-          <em aria-hidden>Rp</em>
-          <input
-            required type="number" inputMode="decimal" min={0} step={1} value={draft}
-            placeholder="0" onChange={(e) => setDraft(e.target.value)}
-          />
-        </span>
-      </label>
-      {op === "add" && (
-        <div className="pfx-chips" role="group" aria-label="Jumlah cepat">
-          {CASH_PRESETS.map((v) => (
-            <button type="button" key={v} onClick={() => bump(v)}>+{v / 1_000_000} jt</button>
-          ))}
-        </div>
-      )}
-      <p className={`cash-preview${next != null && next < 0 ? " bad" : ""}`} aria-live="polite">
-        {next == null ? "Isi jumlah untuk melihat saldo baru." : next < 0 ? "Jumlah melebihi saldo cash saat ini." : <>Saldo menjadi <strong>{rp(next)}</strong></>}
-      </p>
-      <button className="primary" type="submit" disabled={!valid || setCash.isPending}>{setCash.isPending ? "Menyimpan…" : "Simpan cash"}</button>
-      {setCash.isError && <p className="down" role="alert">{setCash.error.message}</p>}
-    </form>
-  );
-}
-
-function AddHolding({ name }: { name: string }) {
-  const { add } = usePortfolioMutations(name);
-  const [ticker, setTicker] = useState<string | null>(null);
-  const [lots, setLots] = useState("");
-  const [date, setDate] = useState("");
-  const [saved, setSaved] = useState<string | null>(null);
-  const today = new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
-  const submit = (ev: FormEvent) => {
-    ev.preventDefault();
-    if (!ticker) return;
-    const t = ticker;
-    add.mutate(
-      { ticker: t, lots: Number(lots), buy_date: date },
-      { onSuccess: () => { setSaved(t); setTicker(null); setLots(""); } },
-    );
-  };
-  return (
-    <form className="pfx-form" onSubmit={submit}>
-      <div className="field">
-        <span>Emiten</span>
-        {ticker ? (
-          <span className="pfx-pick"><strong>{ticker}</strong><button type="button" className="pfx-link" onClick={() => setTicker(null)}>Ganti</button></span>
-        ) : (
-          <TickerSearch compact remember={false} label="Cari emiten" placeholder="Kode atau sektor" onPick={(t) => { setSaved(null); setTicker(t); }} />
-        )}
-      </div>
-      <label className="field">
-        <span>
-          Jumlah lot
-          <small>{Number(lots) > 0 ? `${Math.round(Number(lots) * 100).toLocaleString("id-ID")} lembar` : "1 lot = 100 lembar"}</small>
-        </span>
-        <span className="pfx-unit">
-          <input required type="number" inputMode="decimal" min={0.01} step={0.01} value={lots} onChange={(e) => setLots(e.target.value)} />
-          <em aria-hidden>lot</em>
-        </span>
-      </label>
-      <label className="field">
-        <span>Tanggal beli</span>
-        <input required type="date" max={today} value={date} onChange={(e) => setDate(e.target.value)} />
-      </label>
-      <button className="primary" type="submit" disabled={add.isPending || !ticker}>{add.isPending ? "Menyimpan…" : "Simpan posisi"}</button>
-      {saved && <p className="pfx-saved" role="status">{saved} tersimpan. Tambahkan saham lain atau tutup panel ini.</p>}
-      {add.isError && <p className="down" role="alert">{add.error.message}</p>}
-    </form>
   );
 }
 
@@ -684,6 +583,7 @@ function PerformancePanel({ e, pending, error, retry }: { e?: Evaluation; pendin
     { key: "verdict", label: "Kesimpulan", get: (r) => VERDICTS[r.b.verdict] },
   ];
 
+  const c = e.cash;
   return (
     <Section title="Kinerja disesuaikan risiko" className="pfx-perf rise d3" collapsible id="pf-sharpe">
       <ul className="rngs">
@@ -721,14 +621,25 @@ function PerformancePanel({ e, pending, error, retry }: { e?: Evaluation; pendin
       </ul>
       <p className="muted small">Batang adalah selang kepercayaan 95% dan garis putus-putus adalah nol. Jika batang melewati nol, hasilnya belum dapat dibedakan dari suku bunga bebas risiko.</p>
       <p className="muted small">Suku bunga bebas risiko memakai suku bunga antarbank 3 bulan (rupiah), sesuai mata uang return saham IDX.</p>
-      {e.cash && e.cash.weight > 0 && (
+      {c && c.weight > 0 && (
         <div className="pfx-cashnote">
-          <strong>Dampak cash ({pct(e.cash.weight, 1)} dari total)</strong>
+          <strong>Dampak cash ({pct(c.weight, 1)} dari total)</strong>
           <p>
             Sharpe di atas hanya menilai bagian saham, jadi tidak turun karena menahan cash. Cash mengurangi risiko:
             volatilitas total {pct(e.portfolio_risk.total_vol, 1)} per tahun (bagian saham saja {pct(e.portfolio_risk.stock_vol, 1)}),
             dengan excess return total {pct(e.portfolio_risk.total_excess_return, 1, true)} per tahun.
           </p>
+          {c.usd > 0 && c.fx && (
+            <p>
+              Cash dolar ({usd(c.usd)}, setara {rp(c.usd_in_idr)} dengan kurs {num(c.fx.rate, 0)} per {day(c.fx.date)}) tidak bebas
+              risiko dalam rupiah: fluktuasi kurs ikut dihitung dalam volatilitas total
+              {c.fx.vol != null ? ` (volatilitas kurs ${pct(c.fx.vol, 1)} per tahun` : ""}
+              {c.fx.vol != null ? (c.fx.rho != null ? `, korelasi dengan saham ${num(c.fx.rho, 2)}).` : "; mode cepat tidak menghitung korelasi dengan saham, dianggap 0).") : "."}
+            </p>
+          )}
+          {c.usd > 0 && !e.portfolio_risk.fx_included && (
+            <p>Data kurs belum cukup untuk menghitung volatilitas kurs, sehingga risiko kurs belum masuk dalam volatilitas total.</p>
+          )}
         </div>
       )}
       <details className="more">
