@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { settingsUrl, startOpenRouterLogin, useAiStatus, useDisconnectAi } from "../lib/ai";
 import "../ai.css";
 
@@ -8,17 +8,39 @@ const POINTS = [
   "Biaya dibebankan ke kredit OpenRouter-mu. Akses bisa dicabut kapan saja.",
 ];
 
-/** flat: tanpa kotak, untuk dipakai di dalam modal akun Clerk. */
+/**
+ * Halaman biasa: setelah tersambung, kartu diringkas jadi satu baris dengan menu ⋯ (Kelola / Putuskan tersembunyi).
+ * flat: dipakai di modal akun Clerk, menampilkan pengaturan lengkap tanpa kotak.
+ */
 export function OpenRouterConnect({ flat = false }: { flat?: boolean }) {
   const status = useAiStatus();
   const disconnect = useDisconnectAi();
   const [busy, setBusy] = useState(false);
+  const [menu, setMenu] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [revokeUrl, setRevokeUrl] = useState<string | null>(null);
+  const wrap = useRef<HTMLDivElement>(null);
 
   const s = status.data;
   const connected = s?.connected === true;
+  const manageUrl = settingsUrl(s?.keyHash ?? null);
+
+  useEffect(() => {
+    if (!menu) return;
+    const outside = (e: PointerEvent) => {
+      if (!wrap.current?.contains(e.target as Node)) { setMenu(false); setConfirming(false); }
+    };
+    const escape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { setMenu(false); setConfirming(false); }
+    };
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [menu]);
 
   const connect = async () => {
     setBusy(true);
@@ -32,13 +54,44 @@ export function OpenRouterConnect({ flat = false }: { flat?: boolean }) {
   };
 
   const drop = () => {
-    const url = settingsUrl(s?.keyHash ?? null);
+    const url = manageUrl;
     setError(null);
     disconnect.mutate(undefined, {
-      onSuccess: () => { setRevokeUrl(url); setConfirming(false); },
+      onSuccess: () => { setRevokeUrl(url); setConfirming(false); setMenu(false); },
       onError: (e) => setError(e.message),
     });
   };
+
+  if (connected && !flat) {
+    return (
+      <div className="ai-bar" ref={wrap}>
+        <span className="ai-badge ok"><span className="ai-dot" aria-hidden />OpenRouter tersambung</span>
+        <button
+          type="button" className="ai-icon-btn" aria-label="Pengaturan koneksi" aria-haspopup="menu" aria-expanded={menu}
+          onClick={() => { setMenu((v) => !v); setConfirming(false); }}
+        >
+          <span aria-hidden>⋯</span>
+        </button>
+        {menu && (
+          <div className="ai-pop ai-menu" role="menu">
+            {manageUrl && <a role="menuitem" href={manageUrl} target="_blank" rel="noreferrer">Kelola di OpenRouter</a>}
+            {confirming ? (
+              <div className="ai-confirm">
+                <span>Putuskan sambungan?</span>
+                <button type="button" className="danger" onClick={drop} disabled={disconnect.isPending}>
+                  {disconnect.isPending ? "Memutus…" : "Ya"}
+                </button>
+                <button type="button" onClick={() => setConfirming(false)}>Batal</button>
+              </div>
+            ) : (
+              <button type="button" role="menuitem" className="danger" onClick={() => setConfirming(true)}>Putuskan</button>
+            )}
+            {error && <p className="ai-menu-err" role="alert">{error}</p>}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <section className={`ai-card${flat ? " flat" : ""}`} aria-label="Koneksi OpenRouter">
@@ -65,9 +118,7 @@ export function OpenRouterConnect({ flat = false }: { flat?: boolean }) {
       )}
 
       {s && !s.configured && (
-        <div className="ai-notice warn" role="status">
-          Fitur AI belum diaktifkan di server. Hubungi administrator Nirflo.
-        </div>
+        <div className="ai-notice warn" role="status">Fitur AI belum diaktifkan di server. Hubungi administrator Nirflo.</div>
       )}
 
       {s?.configured && !connected && (
@@ -94,11 +145,7 @@ export function OpenRouterConnect({ flat = false }: { flat?: boolean }) {
             </div>
           ) : (
             <div className="ai-actions">
-              {s?.keyHash && (
-                <a className="ai-btn ghost" href={settingsUrl(s.keyHash) ?? undefined} target="_blank" rel="noreferrer">
-                  Kelola di OpenRouter
-                </a>
-              )}
+              {manageUrl && <a className="ai-btn ghost" href={manageUrl} target="_blank" rel="noreferrer">Kelola di OpenRouter</a>}
               <button type="button" className="ai-btn ghost" onClick={() => setConfirming(true)}>Putuskan</button>
             </div>
           )}

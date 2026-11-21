@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { AI_PATH, AI_STATUS_KEY, completeOpenRouterLogin } from "../lib/ai";
 import { Loading } from "../components/ui";
-import "../ai.css";
 
 export default function OpenRouterCallbackPage() {
   const nav = useNavigate();
@@ -19,10 +18,5 @@ export default function OpenRouterCallbackPage() {
     return () => { live = false; };
   }, [nav, qc]);
 
-  return (
-    <div className="ai-page">
-      <Loading />
-      <p className="ai-muted" role="status">Menyelesaikan sambungan ke OpenRouter…</p>
-    </div>
-  );
+  return <Loading />;
 }
