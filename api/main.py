@@ -592,6 +592,8 @@ def regime(
 from api.portfolio import router as portfolio_router  # noqa: E402
 
 app.include_router(portfolio_router)
+from api.ai import router as ai_router 
+app.include_router(ai_router)
 
 # ---------------------------------------------------------------- produksi: layani hasil build UI
 class SPA(StaticFiles):

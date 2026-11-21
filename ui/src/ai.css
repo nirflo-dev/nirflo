@@ -1,0 +1,54 @@
+/* Fitur AI. Hanya memakai variabel warna yang sudah ada di styles.css (--surface, --border, --muted, --accent, ...). */
+.ai-page { display: grid; gap: 20px; max-width: 880px; }
+.ai-page h2, .ai-card h2 { margin: 0; font-size: 1.125rem; font-weight: 600; }
+
+.ai-card { display: grid; gap: 14px; padding: 20px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; }
+.ai-card.flat { padding: 0; background: transparent; border: 0; }
+.ai-card.flat h2 { padding-bottom: 14px; font-size: 1.25rem; border-bottom: 1px solid var(--border); }
+.ai-card.flat .ai-head { display: grid; gap: 4px; }
+
+.ai-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.ai-head > div { display: grid; gap: 4px; }
+.ai-muted { margin: 0; color: var(--muted); font-size: 0.875rem; line-height: 1.5; }
+.ai-foot { font-size: 0.75rem; }
+
+.ai-badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; font-size: 0.75rem; font-weight: 600; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; white-space: nowrap; }
+.ai-badge.ok { color: var(--up); }
+.ai-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+
+.ai-points { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; color: var(--muted); font-size: 0.875rem; line-height: 1.5; }
+.ai-points li { position: relative; padding-left: 20px; }
+.ai-points li::before { content: "✓"; position: absolute; left: 0; color: var(--up); font-weight: 700; }
+
+.ai-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+.ai-btn { display: inline-flex; align-items: center; justify-content: center; padding: 8px 14px; font: inherit; font-size: 0.875rem; color: inherit; text-decoration: none; background: transparent; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+.ai-btn:hover:not(:disabled) { border-color: var(--muted); }
+.ai-btn:focus-visible, .ai-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ai-btn:disabled, .ai-chip:disabled { opacity: 0.5; cursor: not-allowed; }
+.ai-btn.primary { color: #fff; background: var(--accent); border-color: var(--accent); }
+.ai-btn.primary:hover:not(:disabled) { filter: brightness(1.1); }
+.ai-btn.danger { color: var(--down); border-color: var(--down); }
+
+.ai-notice { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; font-size: 0.875rem; line-height: 1.5; border: 1px solid var(--border); border-left: 3px solid var(--warn); border-radius: 8px; }
+.ai-notice.err { border-left-color: var(--down); }
+.ai-notice.ok { border-left-color: var(--up); }
+.ai-notice a { color: var(--accent); }
+
+.ai-field { display: grid; gap: 6px; font-size: 0.875rem; }
+.ai-field > span { color: var(--muted); }
+.ai-field input, .ai-compose textarea { width: 100%; padding: 9px 12px; font: inherit; color: inherit; background: transparent; border: 1px solid var(--border); border-radius: 8px; box-sizing: border-box; }
+.ai-field input:focus, .ai-compose textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+.ai-log { display: grid; align-content: start; gap: 10px; min-height: 160px; max-height: 52vh; padding: 4px; overflow-y: auto; }
+.ai-empty { display: grid; gap: 10px; }
+.ai-chip { padding: 7px 12px; font: inherit; font-size: 0.8125rem; color: inherit; text-align: left; background: transparent; border: 1px solid var(--border); border-radius: 999px; cursor: pointer; }
+.ai-chip:hover:not(:disabled) { border-color: var(--accent); }
+
+.ai-msg { max-width: 85%; padding: 10px 14px; font-size: 0.9375rem; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 12px; }
+.ai-msg.user { justify-self: end; color: #fff; background: var(--accent); }
+.ai-msg.assistant { justify-self: start; background: transparent; border: 1px solid var(--border); }
+.ai-msg.pending { color: var(--muted); }
+
+.ai-compose { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 8px; }
+.ai-compose textarea { resize: vertical; min-height: 44px; }

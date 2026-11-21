@@ -64,3 +64,4 @@ uvicorn==0.54.0
 websockets==17.4
 wrapt==2.5.2
 yfinance==1.8.0
+cryptography==50.0.2

@@ -6,6 +6,7 @@ import { day, stampLabel } from "./lib/format";
 import { store } from "./lib/hooks";
 import { Icon, type IconName } from "./components/Icon";
 import { Logo } from "./components/Logo";
+import { OpenRouterConnect } from "./components/OpenRouterConnect";
 import { TickerSearch } from "./components/TickerSearch";
 import { Empty, ErrorBoundary, ErrorState, Loading } from "./components/ui";
 
@@ -15,6 +16,8 @@ const SignalsPage = lazy(() => import("./pages/SignalsPage"));
 const PortfolioPage = lazy(() => import("./pages/PortfolioPage"));
 const MacroPage = lazy(() => import("./pages/MacroPage"));
 const StatusPage = lazy(() => import("./pages/StatusPage"));
+const AiPage = lazy(() => import("./pages/AiPage"));
+const OpenRouterCallbackPage = lazy(() => import("./pages/OpenRouterCallbackPage"));
 
 const NAV: readonly { to: string; label: string; icon: IconName; end?: boolean }[] = [
   { to: "/", label: "Beranda", icon: "home", end: true },
@@ -22,6 +25,7 @@ const NAV: readonly { to: string; label: string; icon: IconName; end?: boolean }
   { to: "/sinyal", label: "Sinyal", icon: "zap" },
   { to: "/portofolio", label: "Portofolio", icon: "pie" },
   { to: "/makro", label: "Makro", icon: "globe" },
+  { to: "/ai", label: "Asisten AI", icon: "sparkles" },
 ];
 
 const TITLES: Record<string, string> = {
@@ -30,6 +34,8 @@ const TITLES: Record<string, string> = {
   sinyal: "Sinyal",
   portofolio: "Portofolio",
   makro: "Makro",
+  ai: "Asisten AI",
+  auth: "Menyambungkan AI",
   status: "Status data",
 };
 
@@ -128,7 +134,11 @@ export default function App() {
           ))}
         </nav>
         <div className="account">
-          <UserButton />
+          <UserButton>
+            <UserButton.UserProfilePage label="Koneksi AI" url="ai" labelIcon={<Icon name="sparkles" size={16} />}>
+              <OpenRouterConnect flat />
+            </UserButton.UserProfilePage>
+          </UserButton>
           <span className="label acc-name">{user?.firstName ?? user?.username ?? ""}</span>
         </div>
         <button type="button" className="collapse" onClick={side.toggle} title={side.collapsed ? "Perluas menu" : "Ciutkan menu"} aria-label={side.collapsed ? "Perluas menu" : "Ciutkan menu"}>
@@ -165,6 +175,8 @@ export default function App() {
                   <Route path="/sinyal" element={<SignalsPage />} />
                   <Route path="/portofolio" element={<PortfolioPage />} />
                   <Route path="/makro" element={<MacroPage />} />
+                  <Route path="/ai" element={<AiPage />} />
+                  <Route path="/auth/openrouter/callback" element={<OpenRouterCallbackPage />} />
                   <Route path="/status" element={<StatusPage />} />
                   <Route path="*" element={<Empty>Halaman tidak ditemukan.</Empty>} />
                 </Routes>
